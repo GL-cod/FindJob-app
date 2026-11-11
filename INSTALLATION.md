@@ -1,6 +1,6 @@
 # Installer « Mes candidatures »
 
-« Mes candidatures » est une application gratuite et open source pour organiser ta recherche d'emploi. Ce guide t'explique comment installer ta propre version, avec **ton** profil, **tes** offres et **ton** suivi. Compte environ 45 minutes la première fois. Tu n'as pas de code à écrire.
+« Mes candidatures » est une application gratuite pour organiser ta recherche d'emploi. Ce guide t'explique comment installer ta propre version, avec **ton** profil, **tes** offres et **ton** suivi. Compte environ 45 minutes la première fois. Tu n'as pas de code à écrire.
 
 ## Ce que fait l'application
 
