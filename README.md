@@ -1,6 +1,8 @@
 # FindJob : « Mes candidatures »
 
-> 🇫🇷 **Tu veux l'utiliser pour toi ?** Suis le guide pas à pas : [INSTALLATION.md](INSTALLATION.md)
+Application gratuite pour organiser sa recherche d'emploi : veille des offres (HelloWork, LinkedIn, APEC, VIE), tri par Gemini selon ton profil, suivi des candidatures, lettres de motivation.
+
+> 🇫🇷 **Pour l'installer**, suis le guide pas à pas : [INSTALLATION.md](INSTALLATION.md)
 > (copie du dépôt, ta clé Gemini, ton profil, installation sur ton PC Windows).
 
 ## Business France Scraper (VIE)

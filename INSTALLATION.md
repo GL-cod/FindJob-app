@@ -1,6 +1,6 @@
-# Installer « Mes candidatures » pour toi
+# Installer « Mes candidatures »
 
-Ce guide est pour toi si quelqu'un t'a passé cette application et que tu veux ta propre version, avec **ton** profil, **tes** offres et **ton** suivi. Compte environ 45 minutes la première fois. Tu n'as pas de code à écrire.
+« Mes candidatures » est une application gratuite et open source pour organiser ta recherche d'emploi. Ce guide t'explique comment installer ta propre version, avec **ton** profil, **tes** offres et **ton** suivi. Compte environ 45 minutes la première fois. Tu n'as pas de code à écrire.
 
 ## Ce que fait l'application
 
@@ -180,7 +180,7 @@ Le README du dépôt détaille cette partie si besoin (section « Set up the sch
 
 ## Recevoir les mises à jour
 
-Quand la personne qui t'a passé l'application l'améliore :
+Quand une nouvelle version de l'application sort :
 
 1. Sur GitHub, dans ta copie, ouvre **Actions**, puis **Mettre à jour depuis l'original**, puis **Run workflow** et **Run workflow**. Le workflow récupère le nouveau code sans toucher à tes offres ni à tes réglages.
 2. Dans l'application, clique sur **⬆️ Mettre à jour l'application** dans la barre de gauche.

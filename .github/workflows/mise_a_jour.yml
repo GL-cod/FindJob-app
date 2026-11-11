@@ -62,6 +62,6 @@ jobs:
             done
           fi
           if ! git diff --quiet HEAD FETCH_HEAD -- .github/workflows; then
-            echo "::warning::Les workflows de l'original ont changé (.github/workflows). Copie-les à la main si besoin, ou demande à la personne qui t'a donné l'application."
+            echo "::warning::Les workflows de l'original ont changé (.github/workflows). Copie-les à la main depuis https://github.com/GL-cod/FindJob-app/tree/main/.github/workflows si besoin."
           fi
           echo "Terminé. Sur le PC : bouton « ⬆️ Mettre à jour l'application »."
