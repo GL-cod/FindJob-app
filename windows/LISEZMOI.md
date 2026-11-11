@@ -13,7 +13,7 @@ tenu à jour automatiquement.
 
 ## Installation
 
-Guide complet pas à pas (copie du dépôt GitHub, clés, réglages) : [INSTALLATION.md](../INSTALLATION.md).
+Guide complet pas à pas (copie du dépôt GitHub, clés, réglages) : [README](../README.md).
 
 Dans PowerShell :
 
