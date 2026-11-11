@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VIE Watcher</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300;12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --paper:  #f3f5f8;
+      --card:   #ffffff;
+      --ink:    #16222f;
+      --muted:  #5c6b7c;
+      --faint:  #93a1b1;
+      --rule:   #d8dee6;
+      --blue:   #2b4fcc;
+      --blue-soft: #dbe3fb;
+      --gold:   #9a6a00;
+      --gold-mark: #e2a400;
+      --gold-soft: #fdf3d7;
+      --red:    #be3b3b;
+      --red-soft: #f9e4e4;
+      --green:  #2e7d53;
+    }
+    * { box-sizing: border-box; }
+    html { background: var(--paper); }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: "Bricolage Grotesque", system-ui, sans-serif;
+      font-size: 15px;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+    .num, td.num, .tick-legend, .stat b, .kfig {
+      font-family: "Spline Sans Mono", ui-monospace, monospace;
+      font-variant-numeric: tabular-nums;
+    }
+    .wrap { max-width: 1060px; margin: 0 auto; padding: 40px 24px 80px; }
+
+    /* ---------- header ---------- */
+    header {
+      display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 18px;
+      padding-bottom: 18px; border-bottom: 2px solid var(--ink);
+      margin-bottom: 6px;
+    }
+    h1 {
+      margin: 0; font-size: 30px; font-weight: 800; letter-spacing: -0.02em;
+      font-variation-settings: "opsz" 40;
+    }
+    h1 em { font-style: normal; color: var(--blue); }
+    #statusline { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; }
+    .pip { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); flex: none; }
+    .pip.ok    { background: var(--green); }
+    .pip.warn  { background: var(--gold-mark); }
+    .pip.bad   { background: var(--red); }
+    @media (prefers-reduced-motion: no-preference) {
+      .pip.ok { animation: breathe 2.6s ease-in-out infinite; }
+      @keyframes breathe { 50% { box-shadow: 0 0 0 4px rgba(46,125,83,0.18); } }
+    }
+
+    /* ---------- sections as ruled bands ---------- */
+    section { padding: 26px 0 30px; border-bottom: 1px solid var(--rule); }
+    section:last-of-type { border-bottom: 0; }
+    .sec-head {
+      display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px;
+      margin-bottom: 14px;
+    }
+    .sec-head h2 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+    .sec-head .note { color: var(--muted); font-size: 13px; }
+    .sec-head .spacer { margin-left: auto; }
+    .stat { color: var(--muted); font-size: 13px; }
+    .stat b { color: var(--ink); font-weight: 500; font-size: 13px; }
+
+    /* ---------- relevant offers (compact side panel) ---------- */
+    .relmini { display: flex; align-items: baseline; gap: 14px; margin-bottom: 12px; }
+    .kfig {
+      font-size: 42px; font-weight: 500; line-height: 1; color: var(--gold);
+      letter-spacing: -0.02em;
+    }
+    .ksub { margin: 0; color: var(--muted); font-size: 13.5px; }
+    .ksub b { color: var(--ink); font-weight: 600; }
+
+    .hits { list-style: none; margin: 0; padding: 0; }
+    .hits li {
+      display: grid; grid-template-columns: 118px 1fr auto; gap: 12px;
+      align-items: baseline;
+      padding: 6px 0; border-bottom: 1px dashed var(--rule);
+      font-size: 13.5px;
+    }
+    .hits li:first-child { border-top: 1px dashed var(--rule); }
+    .hits .when { color: var(--muted); font-size: 13px; }
+    .hits .what b { color: var(--gold); font-weight: 700; }
+    .hits .ago { color: var(--faint); font-size: 12.5px; }
+    .hits .more { border-bottom: 0; color: var(--muted); grid-template-columns: 1fr; }
+    #noHits { color: var(--muted); font-size: 14px; margin: 4px 0 0; }
+    @media (max-width: 400px) { .hits .ago { display: none; } }
+
+    .chart-box.hero-chart { height: 270px; }
+
+    /* ---------- run strip ---------- */
+    #strip {
+      display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
+      gap: 2px; height: 34px; align-items: end; margin: 4px 0 10px;
+    }
+    #strip span {
+      display: block; height: 14px; border-radius: 2px;
+      background: var(--blue-soft);
+      min-width: 2px;
+    }
+    #strip span.hit { background: var(--gold-mark); height: 34px; }
+    #strip span.err { background: var(--red); height: 24px; }
+    #strip span.hit.err {
+      background: linear-gradient(to top, var(--red) 45%, var(--gold-mark) 45%);
+      height: 34px;
+    }
+    .tick-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 12.5px; }
+    .tick-legend i {
+      display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+      margin-right: 6px; vertical-align: -1px; font-style: normal;
+    }
+    .tick-legend .ok  i { background: var(--blue-soft); }
+    .tick-legend .hit i { background: var(--gold-mark); }
+    .tick-legend .err i { background: var(--red); }
+
+    /* ---------- charts ---------- */
+    .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+    @media (max-width: 860px) { .duo { grid-template-columns: 1fr; gap: 0; } .duo > div + div { margin-top: 30px; } }
+    .chart-box { position: relative; height: 220px; }
+    .chart-box.tall { height: 240px; }
+
+    /* ---------- heatmap ---------- */
+    .seg {
+      display: inline-flex; border: 1.5px solid var(--ink); border-radius: 6px;
+      overflow: hidden; margin-left: auto;
+    }
+    .seg button {
+      font: inherit; font-size: 12px; font-weight: 600;
+      padding: 3px 10px; border: 0; cursor: pointer;
+      color: var(--muted); background: var(--card);
+    }
+    .seg button + button { border-left: 1.5px solid var(--ink); }
+    .seg button:hover { color: var(--ink); }
+    .seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+    .seg button:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+    .heat { display: grid; grid-template-columns: 46px repeat(5, 1fr); gap: 3px; }
+    .heat .hd { color: var(--muted); font-size: 12px; text-align: center; padding-bottom: 4px; }
+    .heat .hr {
+      color: var(--faint); font-size: 11.5px;
+      display: flex; align-items: center; justify-content: flex-end; padding-right: 8px;
+      font-family: "Spline Sans Mono", monospace;
+    }
+    .heat .cell { position: relative; height: 20px; border-radius: 3px; background: #e9edf3; }
+    .heat .cell .dot {
+      position: absolute; top: 3px; right: 3px;
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--gold-mark); box-shadow: 0 0 0 1.5px var(--card);
+    }
+    .heat-legend { display: flex; align-items: center; gap: 8px; margin-top: 12px; color: var(--muted); font-size: 12.5px; flex-wrap: wrap; }
+    .heat-legend .sw { width: 20px; height: 11px; border-radius: 2px; display: inline-block; }
+    .heat-legend .dot {
+      display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+      background: var(--gold-mark); margin-right: 5px;
+    }
+
+    /* ---------- table ---------- */
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid var(--rule); text-align: left; }
+    th { color: var(--muted); font-weight: 600; font-size: 12.5px; }
+    th.num, td.num { text-align: right; }
+    td.hitcell { color: var(--gold); font-weight: 700; }
+    tr.err td { color: var(--red); }
+    tr.day-start td { border-top: 1.5px solid var(--faint); }
+    #moreBtn {
+      margin-top: 14px; padding: 8px 16px;
+      font: inherit; font-size: 13.5px; font-weight: 600;
+      color: var(--ink); background: var(--card);
+      border: 1.5px solid var(--ink); border-radius: 6px; cursor: pointer;
+    }
+    #moreBtn:hover { background: var(--ink); color: var(--paper); }
+    #moreBtn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+    #subtitle { color: var(--muted); font-size: 14px; padding: 14px 0 0; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>VIE <em>Watcher</em></h1>
+      <div id="statusline"><span class="pip" id="pip"></span><span id="statusText">Loading metrics…</span></div>
+    </header>
+    <div id="subtitle" hidden></div>
+
+    <section id="dailySec" hidden>
+      <div class="sec-head">
+        <h2>New offers per day</h2>
+        <span class="spacer"></span>
+        <span class="stat">today <b id="kToday">–</b></span>
+        <span class="stat">stored <b id="kStored">–</b></span>
+      </div>
+      <div class="chart-box hero-chart"><canvas id="dailyChart"></canvas></div>
+    </section>
+
+    <section id="stripSec" hidden>
+      <div class="sec-head">
+        <h2>Run health</h2>
+        <span class="note" id="stripNote"></span>
+        <span class="spacer"></span>
+        <span class="stat">errors, last 7 runs <b id="kErr7">–</b></span>
+      </div>
+      <div id="strip" role="img" aria-label="Recent runs, one tick per run"></div>
+      <div class="tick-legend">
+        <span class="ok"><i></i>clean run</span>
+        <span class="hit"><i></i>relevant offer found</span>
+        <span class="err"><i></i>run with errors</span>
+      </div>
+    </section>
+
+    <section id="duoSec" hidden>
+      <div class="duo">
+        <div>
+          <div class="sec-head">
+            <h2>Offer distribution</h2>
+            <span class="note" id="heatNote">weekday and hour, Paris time</span>
+            <div class="seg" id="heatSeg" role="group" aria-label="Heatmap period">
+              <button type="button" data-mode="before" aria-pressed="false">before cron</button>
+              <button type="button" data-mode="after" aria-pressed="false">after cron</button>
+              <button type="button" data-mode="all" aria-pressed="true">all</button>
+            </div>
+          </div>
+          <div class="heat" id="heat"></div>
+          <div class="heat-legend">
+            <span>none</span>
+            <span class="sw" id="sw0"></span><span class="sw" id="sw1"></span>
+            <span class="sw" id="sw2"></span><span class="sw" id="sw3"></span>
+            <span id="heatMax">most</span>
+            <span style="margin-left:10px"><span class="dot"></span>relevant found here</span>
+          </div>
+        </div>
+        <div>
+          <div class="sec-head">
+            <h2>Relevant offers</h2>
+            <span class="note">already delivered via Telegram</span>
+          </div>
+          <div class="relmini">
+            <div class="kfig num" id="kRelevant">–</div>
+            <p class="ksub" id="kRelevantSub"></p>
+          </div>
+          <ul class="hits" id="hitList"></ul>
+          <p id="noHits" hidden>No relevant offers yet. When the watcher flags one, it lands here.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="timeSec" hidden>
+      <div class="sec-head">
+        <h2>Run duration</h2>
+        <span class="note">seconds, log scale — tall spikes are relevance checks on fresh offers</span>
+      </div>
+      <div class="chart-box tall"><canvas id="timeChart"></canvas></div>
+    </section>
+
+    <section id="logSec" hidden>
+      <div class="sec-head">
+        <h2>Run log</h2>
+        <span class="note" id="logNote"></span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Run time (Paris)</th>
+            <th class="num">New</th><th class="num">Relevant</th>
+            <th class="num">Unchecked</th><th class="num">Errors</th>
+            <th class="num">Duration</th>
+          </tr>
+        </thead>
+        <tbody id="logBody"></tbody>
+      </table>
+      <button id="moreBtn" hidden>Show all runs</button>
+    </section>
+  </div>
+
+  <script>
+    const METRICS_URL = "metrics.jsonl";
+    const BACKFILL_THRESHOLD = 100;   
+    const STRIP_RUNS   = 100;         
+    const DAILY_DAYS   = 45;          
+    const DUR_RUNS     = 90;         
+    const LOG_ROWS     = 15;       
+    const HOUR_START = 8, HOUR_END = 20;   
+    const CRON_START = "2026-09-01";  
+    const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+    const HAS_CHART = typeof Chart !== "undefined";
+
+    const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+    const fmtFull = ts => (ts || "").slice(0, 16).replace("T", " ");
+    const fmtNice = ts => {
+      // "2026-08-31T15:20" -> "Mon 31 Aug, 15:20" using the Paris-local string
+      if (!ts || ts.length < 16) return fmtFull(ts);
+      const y = +ts.slice(0, 4), m = +ts.slice(5, 7), d = +ts.slice(8, 10);
+      const dt = new Date(Date.UTC(y, m - 1, d));
+      const wd = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][dt.getUTCDay()];
+      const mo = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][m - 1];
+      return `${wd} ${d} ${mo}, ${ts.slice(11, 16)}`;
+    };
+    const daysAgo = (ts, refTs) => {
+      const day = s => Date.UTC(+s.slice(0,4), +s.slice(5,7) - 1, +s.slice(8,10));
+      return Math.round((day(refTs) - day(ts)) / 86400000);
+    };
+    const agoLabel = n => n <= 0 ? "today" : n === 1 ? "yesterday" : `${n} days ago`;
+
+    if (HAS_CHART) {
+      Chart.defaults.font.family = '"Bricolage Grotesque", system-ui, sans-serif';
+      Chart.defaults.font.size = 12;
+      Chart.defaults.color = css("--muted");
+    }
+
+    function heatColor(v, max) {
+      if (!v) return "#e9edf3";
+      const t = max > 1 ? Math.min(1, v / max) : 1;
+      // pale blue -> bleu de France
+      const lo = [219, 227, 251], hi = [43, 79, 204];
+      const mix = lo.map((c, i) => Math.round(c + (hi[i] - c) * Math.pow(t, 0.8)));
+      return `rgb(${mix[0]},${mix[1]},${mix[2]})`;
+    }
+
+    function heatFilter(runs, mode) {
+      if (mode === "before") return runs.filter(r => (r.timestamp || "") <  CRON_START);
+      if (mode === "after")  return runs.filter(r => (r.timestamp || "") >= CRON_START);
+      return runs;
+    }
+
+    function initHeatmap(allHeatRuns) {
+      const seg = document.getElementById("heatSeg");
+      const note = document.getElementById("heatNote");
+      const render = mode => {
+        const subset = heatFilter(allHeatRuns, mode);
+        buildHeatmap(subset);
+        note.textContent = "weekday and hour, Paris time — " +
+          (mode === "before" ? `${subset.length} runs before cron-jobs`
+         : mode === "after"  ? `${subset.length} runs since cron-jobs`
+         : `all ${subset.length} runs`);
+        for (const b of seg.querySelectorAll("button"))
+          b.setAttribute("aria-pressed", String(b.dataset.mode === mode));
+      };
+      seg.addEventListener("click", e => {
+        const btn = e.target.closest("button[data-mode]");
+        if (btn) render(btn.dataset.mode);
+      });
+      render("all");
+    }
+
+    function buildHeatmap(runs) {
+      const buckets = new Map(), hitBuckets = new Map();
+      for (const r of runs) {
+        const ts = r.timestamp || "";
+        if (ts.length < 13) continue;
+        const y = +ts.slice(0, 4), m = +ts.slice(5, 7), d = +ts.slice(8, 10);
+        const hour = +ts.slice(11, 13);
+        const wd = (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7; // Mon = 0
+        if (wd > 4 || hour < HOUR_START || hour > HOUR_END) continue;
+        const key = wd + ":" + hour;
+        buckets.set(key, (buckets.get(key) ?? 0) + (r.new ?? 0));
+        if ((r.relevant ?? 0) > 0)
+          hitBuckets.set(key, (hitBuckets.get(key) ?? 0) + r.relevant);
+      }
+      const max = Math.max(1, ...buckets.values());
+      let html = `<div class="hd"></div>` + DAY_NAMES.map(d => `<div class="hd">${d}</div>`).join("");
+      for (let h = HOUR_START; h <= HOUR_END; h++) {
+        html += `<div class="hr">${String(h).padStart(2, "0")}</div>`;
+        for (let wd = 0; wd < 5; wd++) {
+          const key = wd + ":" + h;
+          const v = buckets.get(key) ?? 0;
+          const hits = hitBuckets.get(key) ?? 0;
+          const tip = `${DAY_NAMES[wd]} ${String(h).padStart(2,"0")}:00 — ${v} new offer${v === 1 ? "" : "s"}` +
+                      (hits ? `, ${hits} relevant` : "");
+          html += `<div class="cell" style="background:${heatColor(v, max)}" title="${tip}">` +
+                  (hits ? `<span class="dot"></span>` : "") + `</div>`;
+        }
+      }
+      document.getElementById("heat").innerHTML = html;
+      for (let i = 0; i < 4; i++)
+        document.getElementById("sw" + i).style.background = heatColor(Math.round(max * (i + 1) / 4), max);
+      document.getElementById("heatMax").textContent = `most (${max})`;
+    }
+
+    function barChart(runs) {
+      const byDay = new Map();
+      for (const r of runs) {
+        const d = (r.timestamp || "").slice(0, 10);
+        byDay.set(d, (byDay.get(d) ?? 0) + (r.new ?? 0));
+      }
+      const days = [...byDay.keys()].slice(-DAILY_DAYS);
+      if (!HAS_CHART) return;
+      new Chart(document.getElementById("dailyChart"), {
+        type: "bar",
+        data: {
+          labels: days.map(d => d.slice(8) + "/" + d.slice(5, 7)),
+          datasets: [{ data: days.map(d => byDay.get(d)),
+            backgroundColor: css("--blue"), borderRadius: 3, maxBarThickness: 34 }],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          scales: {
+            x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 10 } },
+            y: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: css("--rule") } },
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { title: i => "New offers, " + days[i[0].dataIndex] } },
+          },
+        },
+      });
+    }
+
+    function durationChart(runs) {
+      const recent = runs.slice(-DUR_RUNS);
+      if (!HAS_CHART) return;
+      let prevDay = null;
+      const labels = recent.map(r => {
+        const d = (r.timestamp || "").slice(0, 10);
+        if (d !== prevDay) { prevDay = d; return d.slice(8) + "/" + d.slice(5, 7); }
+        return "";
+      });
+      const clamp = v => Math.max(0.1, v ?? 0.1);
+      new Chart(document.getElementById("timeChart"), {
+        type: "line",
+        data: {
+          labels,
+          datasets: [
+            { label: "Total", data: recent.map(r => clamp(r.total_time)),
+              borderColor: css("--ink"), backgroundColor: "rgba(22,34,47,0.07)",
+              borderWidth: 2, tension: 0.3, fill: true,
+              pointRadius: recent.map(r => (r.errors ?? 0) > 0 ? 4 : 0),
+              pointHoverRadius: recent.map(r => (r.errors ?? 0) > 0 ? 5 : 3),
+              pointBackgroundColor: recent.map(r => (r.errors ?? 0) > 0 ? css("--red") : css("--ink")),
+              pointBorderColor: recent.map(r => (r.errors ?? 0) > 0 ? css("--red") : css("--ink")),
+              pointHoverBackgroundColor: recent.map(r => (r.errors ?? 0) > 0 ? css("--red") : css("--ink")),
+              pointHoverBorderColor: recent.map(r => (r.errors ?? 0) > 0 ? css("--red") : css("--ink")) },
+            { label: "Relevance check", data: recent.map(r => clamp(r.relevance_time)),
+              borderColor: css("--gold-mark"), borderWidth: 1.5, tension: 0.3, pointRadius: 0 },
+            { label: "Scraping", data: recent.map(r => clamp(r.scraping_time)),
+              borderColor: css("--blue"), borderWidth: 1.5, tension: 0.3, pointRadius: 0 },
+          ],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          interaction: { intersect: false, mode: "index" },
+          scales: {
+            x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 12 } },
+            y: { type: "logarithmic", min: 0.5,
+                 grid: { color: css("--rule") },
+                 ticks: { callback: v => [1, 10, 100, 1000].includes(v) ? v + "s" : null } },
+          },
+          plugins: {
+            legend: { labels: { boxWidth: 16, boxHeight: 2 } },
+            tooltip: { callbacks: {
+              title: i => fmtNice(recent[i[0].dataIndex].timestamp),
+              afterBody: i => {
+                const r = recent[i[0].dataIndex];
+                return (r.errors ?? 0) > 0 ? `${r.errors} error${r.errors === 1 ? "" : "s"} in this run` : "";
+              },
+            } },
+          },
+        },
+      });
+    }
+
+    async function load() {
+      const statusText = document.getElementById("statusText");
+      const subtitle = document.getElementById("subtitle");
+      let text;
+      try {
+        const res = await fetch(METRICS_URL, { cache: "no-store" });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        text = await res.text();
+      } catch (e) {
+        statusText.textContent = "no metrics file";
+        subtitle.hidden = false;
+        subtitle.textContent = "No metrics yet. Run the watcher once, then refresh this page.";
+        return;
+      }
+
+      const allRuns = text.trim().split("\n").filter(Boolean)
+        .map(l => { try { return JSON.parse(l); } catch { return null; } })
+        .filter(Boolean);
+      const runs = allRuns.filter(r => (r.new ?? 0) <= BACKFILL_THRESHOLD);
+
+      if (runs.length === 0) {
+        statusText.textContent = "waiting for first run";
+        subtitle.hidden = false;
+        subtitle.textContent = allRuns.length
+          ? "Only the initial backfill has run so far. Regular runs will appear here."
+          : "No runs recorded yet.";
+        return;
+      }
+
+      for (const id of ["dailySec", "stripSec", "duoSec", "timeSec", "logSec"])
+        document.getElementById(id).hidden = false;
+
+      const latest = runs[runs.length - 1];
+      const lastTs = latest.timestamp || "";
+
+      // ---------- status pill ----------
+      const ageH = (Date.now() - new Date(lastTs).getTime()) / 3.6e6;
+      const pip = document.getElementById("pip");
+      if (Number.isFinite(ageH)) {
+        const ageLabel = ageH < 1 ? `${Math.max(1, Math.round(ageH * 60))} min ago`
+                       : ageH < 48 ? `${Math.round(ageH)} h ago`
+                       : `${Math.round(ageH / 24)} days ago`;
+        pip.className = "pip " + (ageH < 3 ? "ok" : ageH < 14 ? "warn" : "bad");
+        statusText.textContent = `last run ${ageLabel}, ${runs.length} runs tracked`;
+        pip.title = "Last run " + fmtNice(lastTs) + " (Paris)";
+      } else {
+        statusText.textContent = `${runs.length} runs tracked`;
+      }
+
+      // ---------- hero: hit logbook ----------
+      const hitRuns = runs.filter(r => (r.relevant ?? 0) > 0);
+      const totalRel = hitRuns.reduce((a, r) => a + r.relevant, 0);
+      document.getElementById("kRelevant").textContent = totalRel;
+      const sub = document.getElementById("kRelevantSub");
+      if (hitRuns.length) {
+        const lastHit = hitRuns[hitRuns.length - 1];
+        sub.innerHTML = `in total, last one <b>${agoLabel(daysAgo(lastHit.timestamp, lastTs))}</b>`;
+      } else {
+        sub.textContent = "so far";
+      }
+
+      const list = document.getElementById("hitList");
+      const shown = hitRuns.slice(-5).reverse();
+      list.innerHTML = shown.map(r => `
+        <li>
+          <span class="when num">${fmtFull(r.timestamp).slice(0, 16)}</span>
+          <span class="what"><b>${r.relevant}</b> offer${r.relevant === 1 ? "" : "s"}, of ${r.new ?? 0} new</span>
+          <span class="ago">${agoLabel(daysAgo(r.timestamp, lastTs))}</span>
+        </li>`).join("");
+      if (hitRuns.length > shown.length)
+        list.innerHTML += `<li class="more">and ${hitRuns.length - shown.length} earlier catch${hitRuns.length - shown.length === 1 ? "" : "es"}</li>`;
+      document.getElementById("noHits").hidden = hitRuns.length > 0;
+
+      // ---------- run health strip ----------
+      const stripRuns = runs.slice(-STRIP_RUNS);
+      document.getElementById("stripNote").textContent =
+        `last ${stripRuns.length} runs, oldest on the left`;
+      document.getElementById("kErr7").textContent =
+        runs.slice(-7).reduce((a, r) => a + (r.errors ?? 0), 0);
+      document.getElementById("strip").innerHTML = stripRuns.map(r => {
+        const cls = [(r.relevant ?? 0) > 0 ? "hit" : "", (r.errors ?? 0) > 0 ? "err" : ""].join(" ").trim();
+        const bits = [`${r.new ?? 0} new`];
+        if (r.relevant) bits.push(`${r.relevant} relevant`);
+        if (r.errors) bits.push(`${r.errors} errors`);
+        return `<span class="${cls}" title="${fmtNice(r.timestamp)} — ${bits.join(", ")}"></span>`;
+      }).join("");
+
+      // ---------- activity ----------
+      const today = lastTs.slice(0, 10);
+      document.getElementById("kToday").textContent =
+        runs.filter(r => (r.timestamp || "").slice(0, 10) === today)
+            .reduce((a, r) => a + (r.new ?? 0), 0);
+      document.getElementById("kStored").textContent = latest.stored ?? "–";
+      barChart(runs);
+      initHeatmap(runs);
+
+      // ---------- duration ----------
+      durationChart(runs);
+
+      // ---------- run log ----------
+      const body = document.getElementById("logBody");
+      const renderLog = limit => {
+        let prevRowDay = null;
+        body.innerHTML = runs.slice(limit ? -limit : 0).reverse().map(r => {
+          const d = (r.timestamp || "").slice(0, 10);
+          const dayStart = d !== prevRowDay; prevRowDay = d;
+          const rel = r.relevant ?? 0;
+          const cls = [(r.errors ?? 0) > 0 ? "err" : "", dayStart ? "day-start" : ""].join(" ").trim();
+          return `<tr class="${cls}">
+            <td class="num">${fmtFull(r.timestamp)}</td>
+            <td class="num">${r.new ?? 0}</td>
+            <td class="num ${rel > 0 ? "hitcell" : ""}">${rel}</td>
+            <td class="num">${r.unchecked ?? 0}</td>
+            <td class="num">${r.errors ?? 0}</td>
+            <td class="num">${r.total_time ?? "–"}s</td>
+          </tr>`;
+        }).join("");
+      };
+      renderLog(LOG_ROWS);
+      const moreBtn = document.getElementById("moreBtn");
+      if (runs.length > LOG_ROWS) {
+        moreBtn.hidden = false;
+        document.getElementById("logNote").textContent = `showing the last ${LOG_ROWS} of ${runs.length} runs`;
+        moreBtn.addEventListener("click", () => {
+          renderLog(0);
+          moreBtn.hidden = true;
+          document.getElementById("logNote").textContent = `all ${runs.length} runs`;
+        }, { once: true });
+      }
+    }
+
+    load();
+  </script>
+</body>
+</html>

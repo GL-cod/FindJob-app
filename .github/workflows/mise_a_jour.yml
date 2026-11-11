@@ -1,0 +1,67 @@
+name: Mettre à jour depuis l'original
+
+# Pour une copie (fork) du dépôt : récupère la dernière version du CODE du dépôt d'origine,
+# sans toucher à tes données (offres, refus, statistiques) ni à tes réglages (cdi_search.yaml).
+# Actions > Mettre à jour depuis l'original > Run workflow. Ensuite, sur le PC, bouton
+# « ⬆️ Mettre à jour l'application ».
+# Les fichiers du dossier .github/workflows ne peuvent pas être mis à jour ainsi (GitHub
+# l'interdit) : ils changent rarement, le résumé du passage indique s'il y a du nouveau.
+
+on:
+  workflow_dispatch:
+    inputs:
+      origine:
+        description: "Dépôt d'origine"
+        required: true
+        default: "https://github.com/GL-cod/FindJob-app"
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    concurrency: vie-watcher-store
+    steps:
+      - name: Refuser sur le dépôt d'origine
+        if: github.repository == 'GL-cod/FindJob' || github.repository == 'GL-cod/FindJob-app'
+        run: |
+          echo "::error::Ce workflow sert aux copies du dépôt, pas au dépôt d'origine."
+          exit 1
+
+      - name: Récupérer ton dépôt
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Copier le code de l'original
+        env:
+          ORIGINE: ${{ github.event.inputs.origine }}
+        run: |
+          git fetch --depth 1 "$ORIGINE" main
+          # Code et documentation seulement : data/, tes statistiques et cdi_search.yaml restent les tiens
+          PATHS="app src windows tests google_sheets .streamlit requirements.txt requirements-app.txt cdi_search.exemple.yaml README.md INSTALLATION.md docs/index.html .gitignore"
+          for p in $PATHS; do
+            if git cat-file -e "FETCH_HEAD:$p" 2>/dev/null; then
+              rm -rf "$p"
+              git checkout FETCH_HEAD -- "$p"
+            fi
+          done
+          git config user.name "mise-a-jour"
+          git config user.email "actions@github.com"
+          git add -A
+          if git diff --staged --quiet; then
+            echo "Déjà à jour."
+          else
+            git diff --staged --stat
+            git commit -m "Mise à jour du code depuis $ORIGINE [skip ci]"
+            for i in 1 2 3; do
+              git pull --rebase origin main && git push && break
+              sleep 5
+            done
+          fi
+          if ! git diff --quiet HEAD FETCH_HEAD -- .github/workflows; then
+            echo "::warning::Les workflows de l'original ont changé (.github/workflows). Copie-les à la main si besoin, ou demande à la personne qui t'a donné l'application."
+          fi
+          echo "Terminé. Sur le PC : bouton « ⬆️ Mettre à jour l'application »."

@@ -1,0 +1,60 @@
+name: Première installation
+
+# À lancer UNE fois, juste après avoir copié (fork) le dépôt de quelqu'un d'autre :
+# vide les offres, refus et statistiques hérités, et remet cdi_search.yaml à sa version
+# de départ (cdi_search.exemple.yaml) pour que tout soit jugé avec TON profil.
+# Actions > Première installation > Run workflow > tape OUI > Run workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Tape OUI pour effacer les données héritées et repartir de zéro"
+        required: true
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    concurrency: vie-watcher-store
+    steps:
+      - name: Refuser sans confirmation
+        if: github.event.inputs.confirmation != 'OUI'
+        run: |
+          echo "::error::Confirmation manquante : relance le workflow et tape OUI (en majuscules)."
+          exit 1
+
+      - name: Refuser sur le dépôt d'origine
+        if: github.repository == 'GL-cod/FindJob' || github.repository == 'GL-cod/FindJob-app'
+        run: |
+          echo "::error::Ce workflow sert aux copies du dépôt, pas au dépôt d'origine."
+          exit 1
+
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Repartir de zéro
+        run: |
+          echo '{}' > data/offers.json
+          echo '{}' > data/cdi_offers.json
+          echo '{}' > data/cdi_state.json
+          echo '[]' > data/feedback.json
+          : > docs/metrics.jsonl
+          : > docs/cdi_metrics.jsonl
+          cp cdi_search.exemple.yaml cdi_search.yaml
+          git config user.name "premiere-installation"
+          git config user.email "actions@github.com"
+          git add data/offers.json data/cdi_offers.json data/cdi_state.json data/feedback.json \
+                  docs/metrics.jsonl docs/cdi_metrics.jsonl cdi_search.yaml
+          if git diff --staged --quiet; then
+            echo "Déjà propre, rien à faire."
+          else
+            git commit -m "Première installation : données remises à zéro [skip ci]"
+            git push
+          fi
+          echo "C'est fait. Modifie maintenant cdi_search.yaml (mots-clés, CV...) sur GitHub."

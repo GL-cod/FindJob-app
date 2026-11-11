@@ -1,0 +1,28 @@
+# Apparence de l'application « Mes candidatures » : thème sombre uniquement.
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+
+[theme]
+base = "dark"
+primaryColor = "#8B93FF"
+backgroundColor = "#0F1117"
+secondaryBackgroundColor = "#1A1D27"
+textColor = "#E7E9F0"
+borderColor = "#2B3040"
+linkColor = "#A5ACFF"
+dataframeHeaderBackgroundColor = "#202433"
+greenColor = "#4ADE80"
+redColor = "#F87171"
+yellowColor = "#FACC15"
+baseRadius = "0.6rem"
+buttonRadius = "0.6rem"
+showWidgetBorder = true
+headingFontWeights = [700, 650, 600, 600, 600, 600]
+metricValueFontSize = "1.9rem"

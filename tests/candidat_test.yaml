@@ -1,0 +1,42 @@
+# Réglages fixes pour les tests (indépendants du cdi_search.yaml de chacun).
+candidat:
+  nom: Camille Martin
+  metiers: "l'informatique ou la gestion de projet IT"
+  cvs:
+    informatique:
+      nom: Ingénieur Informatique
+      quand: "poste technique (développement, IT, data)"
+      angle: "technique (ingénieur informatique)"
+    projet:
+      nom: Ingénieur Projet
+      quand: "poste de gestion/pilotage (chef de projet, PMO, AMOA)"
+      angle: "gestion de projet IT"
+  cv_vie:
+    fr: CV VIE en français
+    en: CV VIE en anglais
+  reseau:
+    recherche: réalité virtuelle
+    exemple: "un projet de fin d'études en réalité virtuelle"
+    entreprises:
+      - ["Entreprise 0", "Secteur", "réalité virtuelle"]
+      - ["Entreprise 1", "Secteur", "réalité virtuelle"]
+      - ["Entreprise 2", "Secteur", "réalité virtuelle"]
+      - ["Entreprise 3", "Secteur", "réalité virtuelle"]
+      - ["Entreprise 4", "Secteur", "réalité virtuelle"]
+      - ["Entreprise 5", "Secteur", "réalité virtuelle"]
+      - ["Entreprise 6", "Secteur", "réalité virtuelle"]
+      - ["Entreprise 7", "Secteur", "réalité virtuelle"]
+      - ["Entreprise 8", "Secteur", "réalité virtuelle"]
+      - ["Entreprise 9", "Secteur", "réalité virtuelle"]
+      - ["Entreprise 10", "Secteur", "réalité virtuelle"]
+      - ["Entreprise 11", "Secteur", "réalité virtuelle"]
+      - ["Entreprise 12", "Secteur", "réalité virtuelle"]
+      - ["Entreprise 13", "Secteur", "réalité virtuelle"]
+      - ["Entreprise 14", "Secteur", "réalité virtuelle"]
+      - ["Entreprise 15", "Secteur", "réalité virtuelle"]
+      - ["Entreprise 16", "Secteur", "réalité virtuelle"]
+      - ["Entreprise 17", "Secteur", "réalité virtuelle"]
+      - ["Entreprise 18", "Secteur", "réalité virtuelle"]
+      - ["Entreprise 19", "Secteur", "réalité virtuelle"]
+      - ["Entreprise 20", "Secteur", "réalité virtuelle"]
+      - ["Entreprise 21", "Secteur", "réalité virtuelle"]

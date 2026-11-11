@@ -1,0 +1,63 @@
+name: CDI Watcher
+
+# Runs at 12:00 and 19:00 Paris time on weekdays (HelloWork + France Travail; LinkedIn and APEC run on the PC).
+# GitHub cron is in UTC and Paris is UTC+1 in winter, UTC+2 in summer: both UTC hours are
+# listed, and the script itself only works at the hours in cdi_search.yaml (run_hours).
+# "Run workflow" by hand forces a full run.
+on:
+  schedule:
+    - cron: "7 10,11,17,18 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    # same group as the VIE watcher: the two never push at the same time
+    concurrency: vie-watcher-store
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run the CDI watcher
+        env:
+          FORCE_RUN: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FT_CLIENT_ID: ${{ secrets.FT_CLIENT_ID }}
+          FT_CLIENT_SECRET: ${{ secrets.FT_CLIENT_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # your CDI profile (falls back to USER_DESCRIPTION if not set)
+          CDI_USER_DESCRIPTION: ${{ secrets.CDI_USER_DESCRIPTION || vars.CDI_USER_DESCRIPTION }}
+          USER_DESCRIPTION: ${{ vars.USER_DESCRIPTION }}
+        run: python -m src.cdi_main
+
+      - name: Persist the CDI store and metrics
+        run: |
+          git config user.name "cdi-watcher-bot"
+          git config user.email "actions@github.com"
+          for f in data/cdi_offers.json data/cdi_state.json docs/cdi_metrics.jsonl; do
+            [ -f "$f" ] && git add "$f"
+          done
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Update CDI offers store and metrics [skip ci]"
+            for i in 1 2 3; do
+              git pull --rebase origin main && git push && break
+              sleep 5
+            done
+          fi

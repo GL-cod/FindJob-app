@@ -1,0 +1,93 @@
+name: VIE Watcher
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    concurrency: vie-watcher-store
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # latest main, not the commit at trigger time (the CDI watcher also commits)
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build config.yaml
+        env:
+          # sensitive values -> repository Secrets
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # non-sensitive preference -> repository Variable
+          USER_DESCRIPTION: ${{ vars.USER_DESCRIPTION }}
+        run: |
+          python - <<'PY'
+          import os, yaml, pathlib
+
+          # values are passed via env and dumped with yaml.safe_dump, so any
+          # quotes or special characters in the profile are escaped correctly
+          config = {
+              "api": {
+                  # public key embedded in the Business France website
+                  "search_url": "https://civiweb-api-prd.azurewebsites.net/api/Offers/search",
+                  "api_key": "l+KwpoLPiXlsjxNT/NQ2iOFz8+iuygxAODs9FeAEWYM=",
+              },
+              "scraping": {
+                  "max_days": 14,
+                  "batch_size": 200,
+              },
+              "relevance": {
+                  "gemini_api_key": os.environ["GEMINI_API_KEY"],
+                  "user_description": os.environ["USER_DESCRIPTION"],
+                  "models": [
+                      {"name": "gemini-3.5-flash-lite"},
+                      {"name": "gemini-3.1-flash-lite"},
+                  ],
+              },
+              "telegram": {
+                  "bot_token": os.environ["TELEGRAM_BOT_TOKEN"],
+                  "chat_id": os.environ["TELEGRAM_CHAT_ID"],
+              },
+          }
+          pathlib.Path("config.yaml").write_text(
+              yaml.safe_dump(config, sort_keys=False, allow_unicode=True),
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Run the watcher
+        env:
+          FORCE_RUN: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
+        run: python -m src.main
+
+      - name: Persist the store and metrics
+        run: |
+          git config user.name "vie-watcher-bot"
+          git config user.email "actions@github.com"
+          # stage whichever of the two files exist
+          [ -f data/offers.json ] && git add data/offers.json
+          [ -f docs/metrics.jsonl ] && git add docs/metrics.jsonl
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Update offers store and metrics [skip ci]"
+            # the CDI watcher may have pushed meanwhile: rebase on it, then push
+            for i in 1 2 3; do
+              git pull --rebase origin main && git push && break
+              sleep 5
+            done
+          fi

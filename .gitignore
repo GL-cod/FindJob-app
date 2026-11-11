@@ -1,0 +1,26 @@
+venv314/
+.venv/
+env/
+
+*.ipynb
+
+__pycache__/
+*.py[cod]
+
+.vscode/
+
+.DS_Store
+Thumbs.db
+
+config.yaml
+
+data/*
+!data/offers.json
+!data/cdi_offers.json
+!data/cdi_state.json
+!data/feedback.json
+!docs/metrics.jsonl
+# local Windows runs (windows/)
+.env
+profile_cdi.txt
+logs/

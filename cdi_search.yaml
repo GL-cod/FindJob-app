@@ -1,0 +1,141 @@
+# Réglages de recherche du CDI Watcher (HelloWork + LinkedIn).
+# Version de départ pour une nouvelle personne : le workflow « Première installation »
+# la copie dans cdi_search.yaml.
+# Ce fichier ne contient rien de secret : tu peux le modifier directement sur GitHub.
+# Ton profil (texte envoyé à Gemini) est dans le secret GitHub CDI_USER_DESCRIPTION
+# et dans le fichier profile_cdi.txt du PC.
+
+# Chaque mot-clé = 1 recherche par source et par page. Plus il y en a, plus le
+# risque de blocage (surtout LinkedIn) et la conso Gemini augmentent.
+keywords:
+  # Remplace ces exemples par les intitulés de postes que TU cherches (5 à 15, c'est bien).
+  - chef de projet junior
+  - chargé de mission
+  - développeur python
+
+# Offres plus anciennes ignorées (jours). Les offres déjà vues sont gardées
+# en mémoire pendant cette durée pour ne jamais être notifiées deux fois.
+max_days: 21
+
+# Offres exigeant PLUS que ce nombre d'années d'expérience = écartées
+# (3 -> "3 ans" accepté, "4 ans", "5 ans minimum", "3 à 5 ans"... selon le minimum).
+max_experience_years: 3
+
+# Mots qui, présents dans l'intitulé, font écarter l'offre sans appeler Gemini.
+excluded_title_words:
+  - stage
+  - stagiaire
+  - alternance
+  - alternant
+  - alternante
+  - apprenti
+  - apprentie
+  - internship
+  - intern
+  - freelance
+  - senior
+  - sr
+  - confirmé
+  - confirmée
+  - expérimenté
+  - expérimentée
+  - expert
+  - experte
+  - staff
+  - principal
+  - head of
+  - directeur
+  - directrice
+  - director
+
+
+# Domaines que tu ne veux pas : Gemini répond NON pour ces offres même si
+# l'intitulé passe le filtre ci-dessus.
+excluded_domains:
+  # Exemples à adapter (ou supprime ces lignes) :
+  - vente / commercial pur (prospection, objectifs de chiffre d'affaires)
+  - centre d'appels, télévente
+
+# Nombre max d'offres jugées par Gemini à chaque exécution (le reste attend
+# l'exécution suivante). Protège le quota gratuit partagé avec le VIE Watcher.
+max_checks_per_run: 120
+
+# Heures (Europe/Paris, jours ouvrés) où le CDI Watcher tourne sur GitHub (HelloWork).
+# Le planning GitHub (.github/workflows/cdi_watch.yml) le déclenche vers 12h et 19h.
+run_hours: [12, 19]
+
+hellowork:
+  enabled: true
+  location: Île-de-France
+  contracts: CDI          # vide = tous contrats
+  pages_per_keyword: 1    # 30 offres par page
+
+francetravail:
+  # API officielle et gratuite (https://francetravail.io). Il faut les secrets GitHub
+  # FT_CLIENT_ID et FT_CLIENT_SECRET ; sans eux, la source est simplement ignorée.
+  enabled: true
+  region: "11"            # Île-de-France (ou departements: [75, 91, 92] pour viser plus fin)
+  contrat: CDI
+  max_results_per_keyword: 150   # maximum autorisé par l'API
+
+apec:
+  # false sur GitHub : l'APEC bloque ses serveurs (403). La recherche APEC tourne
+  # sur ton PC avec LinkedIn (CDI_SOURCES=linkedin,apec).
+  enabled: false
+  lieu: "711"             # Île-de-France
+  contrat: "101888"       # CDI
+  pages_per_keyword: 1    # 20 offres par page
+  max_details_per_run: 80
+
+linkedin:
+  # false sur GitHub : LinkedIn bloque ses serveurs. La recherche LinkedIn tourne
+  # sur ton PC (dossier windows/), qui force CDI_SOURCES=linkedin.
+  enabled: false
+  geo_id: 104246759       # Île-de-France
+  posted_within: r259200  # 72 h (couvre le week-end) ; r86400 = 24 h, r604800 = 7 jours
+  job_types: F            # F = temps plein ; vide = tous
+  experience_levels: ""   # ex. "1,2,3" (stage, premier emploi, associé) ; vide = tous
+  pages_per_keyword: 1    # 10 offres par page
+  # Pages de détail lues par passage (c'est là que LinkedIn limite). Le reste
+  # est repris au passage suivant.
+  max_details_per_run: 40
+
+gemini_models:
+  - gemini-3.5-flash-lite
+  - gemini-3.1-flash-lite
+
+# Envoie un brouillon de lettre de motivation avec chaque offre pertinente.
+draft_cover_letter: true
+
+# ---------------------------------------------------------------- qui cherche
+# Tout ce qui est propre à la personne qui utilise l'application (lettres, choix du CV,
+# onglet Réseau). Ton nom complet se règle aussi dans l'onglet 🔎 Réglages de l'application
+# (gardé sur le PC) : s'il y est, il passe avant celui-ci. Ce fichier est PUBLIC si ton
+# dépôt l'est : n'y mets ni téléphone ni e-mail.
+candidat:
+  nom: ""                       # ex. Prénom Nom (laisse vide pour ne le mettre que sur le PC)
+  # Domaines visés : une offre sans lien avec eux est écartée par Gemini.
+  metiers: "la gestion de projet ou l'informatique"
+  # Tes CV (1, 2 ou plus). Gemini conseille celui à envoyer pour chaque offre.
+  # nom = affiché dans l'application ; quand = pour quels postes ; angle = ton de la lettre.
+  cvs:
+    principal:
+      nom: CV principal
+      quand: "tous les postes"
+      angle: ""
+    # Exemple d'un deuxième CV (enlève les # pour l'activer) :
+    # technique:
+    #   nom: CV Développeur
+    #   quand: "poste technique (développement, data, informatique)"
+    #   angle: "technique"
+  # CV conseillé pour les offres VIE, selon la langue de l'offre.
+  cv_vie:
+    fr: CV en français
+    en: CV en anglais
+  reseau:
+    # Mots-clés ajoutés au nom de l'entreprise pour chercher des contacts sur LinkedIn.
+    recherche: "chef de projet"
+    # Une expérience à citer dans les messages de prise de contact (laisse vide sinon).
+    exemple: ""
+    # Liste de départ de l'onglet Réseau : [nom, secteur, mots-clés LinkedIn]. Facultatif.
+    entreprises: []
