@@ -8,6 +8,8 @@ permissions:
 
 jobs:
   watch:
+    # pas sur le dépôt public de référence (il n'a ni profil ni clés) ; tourne sur les copies
+    if: github.repository != 'GL-cod/FindJob-app'
     runs-on: ubuntu-latest
     concurrency: vie-watcher-store
 
