@@ -33,7 +33,6 @@ except ImportError:
     cv_pptx = None
 from src.gemini_handler import GeminiHandler  # noqa: E402
 
-REPO_URL = gitsync.repo_url(ROOT)
 SCHEDULE_TEXT = ("ainsi : VIE toutes les heures de 8h à 20h en semaine (GitHub), HelloWork et France Travail à 12h et 19h (GitHub), "
                  "LinkedIn et APEC à 12h05 et 19h05 (sur ce PC, allumé et session ouverte)")
 STATUS_ICONS = {"À regarder": "🔵", "Candidaté": "📨", "Entretien": "🗓️",
@@ -110,6 +109,20 @@ def background_watch():
         st.session_state.setdefault("toasts", []).extend(state["done"])
         state["done"].clear()
         st.rerun(scope="app")
+    gen = SHEET["gen"]
+    if st.session_state.setdefault("sheet_gen", gen) != gen:   # the Google Sheet was read again
+        st.session_state.sheet_gen = gen
+        st.rerun(scope="app")
+
+
+@st.cache_resource
+def repo_url():
+    return gitsync.repo_url(ROOT)
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def app_version():
+    return gitsync.last_update(ROOT)
 
 
 def tracked_pull():
@@ -117,9 +130,19 @@ def tracked_pull():
     with background()["git_lock"]:
         before = gitsync.head(ROOT)
         ok, out = gitsync.pull(ROOT)
-        if gitsync.code_changed(ROOT, before, gitsync.head(ROOT)):
+        after = gitsync.head(ROOT)
+        if gitsync.code_changed(ROOT, before, after):
             update_state()["pending"] = True
+            app_version.clear()
     return ok, out
+
+
+def startup_pull():
+    """git pull done in the background when the window opens: the page shows the offers already
+    on the PC at once, and reloads by itself if GitHub had new ones."""
+    before = gitsync.head(ROOT)
+    tracked_pull()
+    return "🔄 Nouvelles données récupérées depuis GitHub" if gitsync.head(ROOT) != before else None
 
 
 def restart_server():
@@ -177,9 +200,21 @@ def gemini_and_profile():
     return GeminiHandler(key, [{"name": m} for m in settings["gemini_models"]]), profile
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def read_sheet():
-    """The whole Google Sheet: {rows, sheet_url, version, error, read_at}."""
+SHEET_CACHE = ROOT / "data" / "sheet_cache.json"   # last copy of the Google Sheet (this PC only)
+SHEET_TTL = 300
+
+
+@st.cache_resource
+def sheet_store():
+    """Last copy of the Google Sheet, shared by every run; refreshed in a background thread."""
+    import threading
+    return {"data": None, "fetched_at": 0.0, "fetching": False, "gen": 0, "lock": threading.Lock()}
+
+
+SHEET = sheet_store()
+
+
+def _fetch_sheet():
     read_at = tracking.now_str()[-5:]
     if not SHEETS_ON:
         return {"rows": [], "sheet_url": "", "version": 0, "error": None, "read_at": read_at}
@@ -189,6 +224,90 @@ def read_sheet():
                 "error": None, "read_at": read_at}
     except Exception as e:
         return {"rows": [], "sheet_url": "", "version": 0, "error": str(e), "read_at": read_at}
+
+
+def _store_sheet(store, data):
+    import json
+    if data["error"] and store["data"] and not store["data"].get("error") and store["data"]["rows"]:
+        data = {**store["data"], "error": None}   # Google hiccup: keep the last good copy
+    else:
+        try:
+            if not data["error"]:
+                SHEET_CACHE.parent.mkdir(parents=True, exist_ok=True)
+                tmp = SHEET_CACHE.with_suffix(".tmp")
+                tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+                tmp.replace(SHEET_CACHE)
+        except OSError:
+            pass
+    store["data"] = data
+    store["fetched_at"] = time.time()
+    store["gen"] += 1
+
+
+def _refresh_sheet(store):
+    try:
+        _store_sheet(store, _fetch_sheet())
+    finally:
+        store["fetching"] = False
+
+
+def read_sheet():
+    """The whole Google Sheet: {rows, sheet_url, version, error, read_at}.
+
+    Never waits for Google: answers with the last copy (kept on disk, so the window opens at
+    once), and reads the sheet again in the background when that copy is older than SHEET_TTL;
+    the page reloads by itself when the new copy arrives (background_watch)."""
+    store = SHEET
+    if store["data"] is None:
+        import json
+        try:
+            store["data"] = {**json.loads(SHEET_CACHE.read_text(encoding="utf-8")), "error": None}
+        except (OSError, ValueError):
+            store["data"] = {"rows": [], "sheet_url": "", "version": 0, "error": None, "read_at": "…",
+                             "loading": True}
+    if SHEETS_ON and time.time() - store["fetched_at"] > SHEET_TTL:
+        import threading
+        with store["lock"]:
+            if not store["fetching"]:
+                store["fetching"] = True
+                threading.Thread(target=_refresh_sheet, args=(store,), name="lecture-sheets", daemon=True).start()
+    return store["data"]
+
+
+def _clear_sheet(wait=False):
+    """Read the Google Sheet again: in the background, or at once with wait=True."""
+    store = SHEET
+    if wait:
+        _store_sheet(store, _fetch_sheet())
+    else:
+        store["fetched_at"] = 0.0
+        read_sheet()
+
+
+read_sheet.clear = _clear_sheet
+
+
+@st.cache_data(max_entries=300, show_spinner=False)
+def letter_file(offer, letter, english, contact_stamp):
+    return letter_docx.build(offer, letter, english=english)
+
+
+@st.cache_data(max_entries=100, show_spinner=False)
+def cv_file(path, stamp, changes):
+    return cv_pptx.build(Path(path).read_bytes(), changes)
+
+
+@st.cache_data(max_entries=100, show_spinner=False)
+def cv_diff(path, stamp, changes):
+    return cv_pptx.diff(Path(path).read_bytes(), changes)
+
+
+def file_stamp(path):
+    try:
+        s = Path(path).stat()
+        return s.st_size, s.st_mtime_ns
+    except OSError:
+        return None
 
 
 def push_feedback():
@@ -261,7 +380,7 @@ def render_cv(o, handler, profile):
         changes = done.get("modifications") or {}
         c1, c2 = st.columns([1, 2])
         c1.download_button(
-            "⬇️ Télécharger le CV (.pptx)", data=cv_pptx.build(path.read_bytes(), changes),
+            "⬇️ Télécharger le CV (.pptx)", data=cv_file(str(path), file_stamp(path), changes),
             file_name=cv_pptx.file_name(o, candidat.nom()), mime=cv_pptx.MIME,
             key=f"cvdl_{o['id']}", width="stretch")
         c2.caption(f"À partir de « {candidat.cv_label(done['modele']) or done['modele']} ». Ouvre-le dans "
@@ -269,7 +388,7 @@ def render_cv(o, handler, profile):
         if done.get("resume"):
             st.markdown(f"💬 _{done['resume']}_")
         with st.popover(f"Voir les {len(changes)} modification(s)"):
-            for before, after in cv_pptx.diff(path.read_bytes(), changes):
+            for before, after in cv_diff(str(path), file_stamp(path), changes):
                 st.markdown(f"~~{before}~~  \n→ {after}")
     elif done:
         st.caption("Le modèle utilisé pour ce CV a été supprimé : génère-le à nouveau.")
@@ -400,8 +519,8 @@ def auto_refresh():
 
 # ----------------------------------------------------------------- first load
 if "synced" not in st.session_state:
-    sync_github(show=False)
     st.session_state.synced = True
+    run_later(startup_pull)   # in the background: the page shows what is already on the PC at once
 
 for _msg in st.session_state.pop("toasts", []):
     st.toast(_msg)
@@ -412,6 +531,8 @@ offers = tracking.load_offers(suivi=suivi)
 sheet = read_sheet()
 sheet_error = sheet["error"]
 in_sheet = {r["lien"]: r.get("retour") or "" for r in sheet["rows"] if r.get("lien")}
+if sheet.get("loading") and SHEETS_ON:
+    st.caption("⏳ Lecture de ton Google Sheets…")
 if st.session_state.pop("sheet_reloaded", False):
     if sheet_error:
         st.toast(f"⚠️ Lecture du Google Sheets impossible : {sheet_error}")
@@ -495,7 +616,7 @@ with st.sidebar:
                  help="Récupère tout de suite les nouvelles offres VIE / HelloWork et relit ton Google Sheets"):
         with st.spinner("Synchronisation..."):
             tracked_pull()
-            read_sheet.clear()
+            read_sheet.clear(wait=True)
         st.session_state.auto_refreshed = True
         st.rerun()
     st.caption("La recherche LinkedIn + APEC se lance depuis l'onglet ⚙️ Activité.")
@@ -518,7 +639,7 @@ with st.sidebar:
                          "ferme la fenêtre, lance windows\\stop_app.ps1 puis rouvre l'icône.")
         else:
             st.error(f"Mise à jour impossible : {out[-300:]}")
-    _version = gitsync.last_update(ROOT)
+    _version = app_version()
     if _version:
         st.caption(f"Version du {_version}")
     st.divider()
@@ -675,7 +796,8 @@ with tab_offres:
                     d1, d2 = st.columns([1, 2])
                     d1.download_button(
                         "⬇️ Télécharger en Word (.docx)",
-                        data=letter_docx.build(o, o["letter"], english=o.get("cv") == "vie_en"),
+                        data=letter_file({k: o.get(k) for k in ("title", "company", "location", "url", "source")},
+                                         o["letter"], o.get("cv") == "vie_en", file_stamp(letter_docx.CONTACT_PATH)),
                         file_name=letter_docx.file_name(o), key=f"docx_{o['id']}", width="stretch",
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     )
@@ -737,7 +859,8 @@ with tab_sheet:
     elif sheet_error:
         st.error(f"Impossible de lire ton Google Sheets : {sheet_error}")
         if st.button("🔄 Réessayer", key="retry_sheet"):
-            read_sheet.clear()
+            with st.spinner("Lecture du Google Sheets..."):
+                read_sheet.clear(wait=True)
             st.session_state.sheet_reloaded = True
             st.rerun()
     else:
@@ -748,7 +871,8 @@ with tab_sheet:
         if sheet["sheet_url"]:
             top2.button("Ouvrir le Google Sheets ↗", on_click=open_external, args=(sheet["sheet_url"],))
         if top3.button("🔄 Relire maintenant"):
-            read_sheet.clear()
+            with st.spinner("Lecture du Google Sheets..."):
+                read_sheet.clear(wait=True)
             st.session_state.sheet_reloaded = True
             st.rerun()
         if sheet["version"] < 2:
@@ -805,7 +929,7 @@ with tab_sheet:
                             done += 1
                         except Exception as e:
                             failed.append(f"ligne {row_n} ({poste[:30]}) : {e}")
-                read_sheet.clear()
+                    read_sheet.clear(wait=True)
                 st.session_state.pop("sheet_editor", None)
                 st.session_state.sheet_save_result = (done, failed)
                 st.rerun()
@@ -1025,7 +1149,7 @@ with tab_reglages:
                 st.rerun()
     st.divider()
     st.button("Modifier cdi_search.yaml sur GitHub ↗", on_click=open_external,
-              args=(f"{REPO_URL}/edit/main/cdi_search.yaml",))
+              args=(f"{repo_url()}/edit/main/cdi_search.yaml",))
     r1, r2 = st.columns(2)
     with r1:
         st.markdown("**Mots-clés**")

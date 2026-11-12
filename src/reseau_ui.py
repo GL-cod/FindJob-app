@@ -40,12 +40,45 @@ def _store():
             "pending": 0, "lock": threading.RLock(), "threads": {}, "idmap": {}, "tmp": 0}
 
 
+CACHE_PATH = reseau.ROOT / "data" / "reseau_cache.json"   # last copy of the sheet (this PC only)
+
+
+def _read_cache():
+    import json
+    try:
+        data = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) and "contacts" in data else None
+    except (OSError, ValueError):
+        return None
+
+
+def _write_cache(data):
+    import json
+    try:
+        CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = CACHE_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(CACHE_PATH)
+    except OSError:
+        pass
+
+
 def _fetch_into(store):
     data = clean(reseau.fetch())
     with store["lock"]:
         if store["pending"]:          # local changes not sent yet: the sheet is behind, keep ours
             return
         store["data"], store["sig"], store["error"] = data, data_sig(data), None
+    _write_cache(data)
+
+
+def _first_fetch(store):
+    try:
+        _fetch_into(store)
+    except Exception as e:
+        store["error"] = str(e)
+    finally:
+        store["loading"] = False
 
 
 def _poller(store):
@@ -110,7 +143,23 @@ def _ensure_threads(store):
 
 
 def get_data(force=False):
+    """The sheet's data, without waiting for Google on the first display: the last copy kept on
+    this PC is shown at once and the sheet is read in the background (watch_sheet redraws)."""
     store = _store()
+    if not force and store["data"] is None:
+        if not store.get("started"):
+            import threading
+            store["started"], store["loading"] = True, True
+            cached = _read_cache()
+            if cached:
+                with store["lock"]:
+                    store["data"], store["sig"] = cached, data_sig(cached)
+            threading.Thread(target=_first_fetch, args=(store,), name="reseau-premiere-lecture",
+                             daemon=True).start()
+        if store["data"] is None:
+            if store.get("loading"):
+                return {"contacts": [], "companies": [], "sheet_url": "", "error": None, "loading": True}
+            force = True              # the first reading failed: try again now (shows the error)
     if force or store["data"] is None:
         try:
             _fetch_into(store)
@@ -182,7 +231,10 @@ def _write(op, *args, done="Enregistré dans ton Google Sheets."):
 def watch_sheet():
     """Redraw the tab when the background reader brought changes made in the sheet."""
     store = _store()
-    if store["sig"] and st.session_state.get("reseau_sig") and store["sig"] != st.session_state["reseau_sig"]:
+    seen = st.session_state.get("reseau_sig")
+    if seen == "loading" and not store.get("loading"):   # first reading over (read, or failed)
+        st.rerun(scope="app")
+    if store["sig"] and seen and store["sig"] != seen:
         st.rerun(scope="app")
 
 
@@ -519,6 +571,10 @@ def render(handler, profile, offers, signature, open_external):
         setup()
         return
     data = get_data()
+    if data.get("loading"):
+        st.session_state["reseau_sig"] = "loading"   # watch_sheet redraws the tab once it is read
+        st.info("⏳ Lecture de ton Google Sheets « Réseau »…")
+        return
     if data["error"]:
         st.error(f"Google Sheets « Réseau » illisible : {data['error']}")
         if st.button("Réessayer"):
@@ -570,5 +626,5 @@ def draw_dialogs():
         watch_sheet()                 # outside the tab's fragment: nested timers confuse Streamlit
     if st.session_state.get("reseau_dialog") and reseau.configured():
         data = get_data()
-        if not data["error"]:
+        if not data["error"] and not data.get("loading"):
             draw_dialog(data)

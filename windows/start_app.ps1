@@ -35,8 +35,16 @@ if ($Restart) {
 }
 
 if (-not (Test-Up)) {
-    # Dépendances à jour (nouvelle fonction = parfois un nouveau paquet) ; rapide si rien ne manque
-    & $python -m pip install --quiet --disable-pip-version-check -r requirements.txt -r requirements-app.txt 2>&1 | Out-Null
+    # Dépendances à jour (nouvelle fonction = parfois un nouveau paquet). pip prend plusieurs
+    # secondes même quand tout est installé : il n'est lancé que si les fichiers requirements ont changé.
+    $Stamp = Join-Path $Root ".venv\requirements.stamp"
+    $ReqHash = (@("requirements.txt", "requirements-app.txt") | Where-Object { Test-Path $_ } |
+        ForEach-Object { (Get-FileHash $_ -Algorithm SHA256).Hash }) -join ""
+    $OldHash = if (Test-Path $Stamp) { (Get-Content $Stamp -Raw).Trim() } else { "" }
+    if ($ReqHash -ne $OldHash) {
+        & $python -m pip install --quiet --disable-pip-version-check -r requirements.txt -r requirements-app.txt 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) { Set-Content -Path $Stamp -Value $ReqHash -Encoding ASCII }
+    }
     # Serveur lancé sans fenêtre ; sa sortie va dans logs\app_server*.log
     $env:PYTHONUTF8 = "1"
     Start-Process -FilePath $python -WorkingDirectory $Root -WindowStyle Hidden `
