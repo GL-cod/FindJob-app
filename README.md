@@ -6,7 +6,7 @@
 
 - Elle cherche toute seule des offres de CDI sur HelloWork (depuis GitHub), sur LinkedIn et sur l'APEC (depuis ton PC), et en option des offres de VIE.
 - Gemini, l'IA gratuite de Google, lit chaque offre et la compare à ton profil. Il donne une note sur 10, conseille le CV à envoyer et écarte ce qui ne te correspond pas.
-- Une application sur ton PC regroupe tout : ouvrir l'offre, « J'ai postulé », « Pas intéressé » (l'application apprend de tes refus), lettre de motivation en Word, préparation d'entretien, statistiques.
+- Une application sur ton PC regroupe tout : ouvrir l'offre, « J'ai postulé », « Pas intéressé » (l'application apprend de tes refus), lettre de motivation en Word, CV adapté à l'offre à partir de tes CV PowerPoint, préparation d'entretien, statistiques.
 - En option, elle se relie à un Google Sheets de suivi de tes candidatures et à un onglet Réseau pour tes prises de contact.
 
 Elle ne postule **jamais** à ta place. C'est toi qui ouvres l'offre et qui envoies ta candidature.
@@ -124,7 +124,7 @@ Le script te guide en 7 étapes :
 
 > Si Windows affiche « l'exécution de scripts est désactivée », vérifie que tu as bien copié la ligne entière avec `-ExecutionPolicy Bypass`.
 
-Dans l'application, va dans l'onglet **🔎 Réglages** et complète tes coordonnées (téléphone, e-mail, ville, LinkedIn). Elles servent pour les lettres en Word et restent sur ton PC.
+Dans l'application, va dans l'onglet **🔎 Réglages** et complète tes coordonnées (téléphone, e-mail, ville, LinkedIn). Elles servent pour les lettres en Word et restent sur ton PC. Dans le même onglet, tu peux déposer tes CV PowerPoint (.pptx) pour obtenir un CV adapté à chaque offre.
 
 ## Étape 7 (facultatif) : relier un Google Sheets de suivi
 
@@ -150,7 +150,8 @@ Le script vérifie le lien et affiche « OK » si tout marche.
   - « ↗ Ouvrir l'offre » ;
   - « ✅ J'ai postulé » ;
   - « ❌ Pas intéressé » : dis pourquoi, et Gemini écartera ensuite les offres du même genre ;
-  - lettre de motivation (téléchargeable en Word) et préparation d'entretien.
+  - lettre de motivation (téléchargeable en Word) et préparation d'entretien ;
+  - CV adapté à l'offre : dépose tes CV PowerPoint (.pptx, une page) dans 🔎 Réglages, Gemini réécrit l'intitulé, le profil et les compétences sans rien inventer, la mise en page reste la tienne.
 - Une offre que tu n'as pas traitée en 14 jours disparaît de la liste.
 - **⚙️ Activité** : lancer une recherche LinkedIn tout de suite, voir l'historique des passages.
 - La première fois que tu cliques sur « Pas intéressé », Git peut te demander de te connecter à GitHub dans le navigateur. Accepte : c'est ce qui envoie tes refus à la recherche sur GitHub.

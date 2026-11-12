@@ -27,6 +27,10 @@ try:
     from src import letter_docx  # needs python-docx (requirements-app.txt)
 except ImportError:
     letter_docx = None
+try:
+    from src import cv_pptx  # needs python-pptx (requirements-app.txt)
+except ImportError:
+    cv_pptx = None
 from src.gemini_handler import GeminiHandler  # noqa: E402
 
 REPO_URL = gitsync.repo_url(ROOT)
@@ -240,6 +244,43 @@ def save_field(offer, **fields):
     suivi = tracking.load_suivi()
     tracking.update_suivi(suivi, offer, **fields)
     tracking.save_suivi(suivi)
+
+
+def render_cv(o, handler, profile):
+    """CV section of an offer: model choice, generation by Gemini, download and changes."""
+    models = cv_pptx.available_models()
+    done = o.get("cv_adapte") or {}
+    default = done.get("modele") if done.get("modele") in models else cv_pptx.model_for_offer(o)
+    model = default
+    if len(models) > 1:
+        model = st.radio("Modèle", models, index=models.index(default), horizontal=True,
+                         format_func=lambda k: candidat.cv_label(k) or k, key=f"cvmodel_{o['id']}",
+                         label_visibility="collapsed")
+    path = cv_pptx.model_path(done.get("modele")) if done else None
+    if done and path:
+        changes = done.get("modifications") or {}
+        c1, c2 = st.columns([1, 2])
+        c1.download_button(
+            "⬇️ Télécharger le CV (.pptx)", data=cv_pptx.build(path.read_bytes(), changes),
+            file_name=cv_pptx.file_name(o, candidat.nom()), mime=cv_pptx.MIME,
+            key=f"cvdl_{o['id']}", width="stretch")
+        c2.caption(f"À partir de « {candidat.cv_label(done['modele']) or done['modele']} ». Ouvre-le dans "
+                   "PowerPoint, relis-le, puis Fichier → Exporter en PDF avant d'envoyer.")
+        if done.get("resume"):
+            st.markdown(f"💬 _{done['resume']}_")
+        with st.popover(f"Voir les {len(changes)} modification(s)"):
+            for before, after in cv_pptx.diff(path.read_bytes(), changes):
+                st.markdown(f"~~{before}~~  \n→ {after}")
+    elif done:
+        st.caption("Le modèle utilisé pour ce CV a été supprimé : génère-le à nouveau.")
+    if handler is not None and st.button("Régénérer le CV" if done else "Générer le CV adapté", key=f"cvgen_{o['id']}"):
+        with st.spinner("Adaptation du CV à l'offre..."):
+            try:
+                desc = o.get("description") or tracking.fetch_description(o)
+                save_field(o, cv_adapte=tracking.generate_cv(o, handler, profile, model, description=desc))
+                st.rerun()
+            except Exception as e:
+                st.error(f"Impossible d'adapter le CV : {e}")
 
 
 def mark_todo(offer):
@@ -661,6 +702,14 @@ with tab_offres:
                     except Exception as e:
                         st.error(f"Impossible de générer la lettre : {e}")
 
+            st.markdown("**📄 CV adapté à l'offre**")
+            if cv_pptx is None:
+                st.caption("Indisponible : relance windows\\start_app.ps1 (installe python-pptx).")
+            elif not cv_pptx.available_models():
+                st.caption("Ajoute tes CV PowerPoint dans l'onglet 🔎 Réglages pour pouvoir les adapter à chaque offre.")
+            else:
+                render_cv(o, handler, profile)
+
             if o["status"] == "Entretien" or o.get("prep"):
                 st.markdown("**🎯 Préparation d'entretien**")
                 if o.get("prep"):
@@ -948,6 +997,32 @@ with tab_reglages:
                 letter_docx.save_contact({k: v.strip() for k, v in values.items()})
                 st.toast("Coordonnées enregistrées (sur ce PC uniquement).")
         st.caption("Gardées uniquement sur ce PC (data/coordonnees.json), jamais envoyées sur GitHub.")
+    st.divider()
+    st.markdown("#### 📄 Tes CV PowerPoint (modèles pour les CV adaptés)")
+    if cv_pptx is None:
+        st.caption("Indisponible : relance windows\\start_app.ps1 (installe python-pptx).")
+    else:
+        st.caption("Un fichier .pptx d'une page par CV. Gemini ne réécrit que l'intitulé, le profil, les compétences "
+                   "et les descriptions, sans rien inventer ; la mise en page, la photo, les dates et tes coordonnées "
+                   "restent telles quelles. Gardés uniquement sur ce PC (data/cv_modeles), jamais envoyés sur GitHub.")
+        for key in cv_pptx.model_keys():
+            label = candidat.cv_label(key) or key
+            c1, c2, c3 = st.columns([2, 3, 1])
+            have = cv_pptx.model_path(key) is not None
+            c1.markdown(f"{'✅' if have else '⬜'} **{label}**")
+            up = c2.file_uploader(f"Modèle {label}", type=["pptx"], key=f"cvup_{key}",
+                                  label_visibility="collapsed")
+            if up is not None and st.session_state.get(f"cvup_done_{key}") != up.file_id:
+                try:
+                    cv_pptx.save_model(key, up.getvalue())
+                    st.session_state[f"cvup_done_{key}"] = up.file_id
+                    st.toast(f"Modèle « {label} » enregistré.")
+                    st.rerun()
+                except ValueError as e:
+                    c2.error(f"Fichier refusé : {e}")
+            if have and c3.button("Retirer", key=f"cvdel_{key}"):
+                cv_pptx.delete_model(key)
+                st.rerun()
     st.divider()
     st.button("Modifier cdi_search.yaml sur GitHub ↗", on_click=open_external,
               args=(f"{REPO_URL}/edit/main/cdi_search.yaml",))

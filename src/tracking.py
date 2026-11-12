@@ -159,6 +159,7 @@ def load_offers(store_paths=None, suivi=None, vie_path=None, scores_path=None):
         o["note"] = s.get("note", "")
         o["letter"] = s.get("letter", "")
         o["prep"] = s.get("prep", "")
+        o["cv_adapte"] = s.get("cv_adapte") or {}
         if s.get("score") is not None:          # scored later from the app
             o["score"], o["reason"] = s["score"], s.get("score_reason") or o.get("reason", "")
         o["status_updated"] = s.get("updated", "")
@@ -286,6 +287,22 @@ def generate_letter(offer, handler, profile, description=None):
     if len(best) < 300:
         raise RuntimeError("Gemini a renvoyé une lettre incomplète, réessaie dans un instant.")
     return best
+
+
+def generate_cv(offer, handler, profile, model_key, description=None, models_dir=None):
+    """CV adapted to the offer from the PowerPoint model `model_key` (see src/cv_pptx.py).
+    Returns what is kept in the follow-up: {"modele", "modifications", "resume"}."""
+    from . import cv_pptx
+    from .cdi_relevance import offer_text
+
+    path = cv_pptx.model_path(model_key, models_dir)
+    if path is None:
+        raise RuntimeError("aucun modèle PowerPoint pour ce CV (onglet 🔎 Réglages)")
+    if description is None:
+        description = offer.get("description") or fetch_description(offer)
+    text = offer_text({**offer, "description": description or DESC_UNAVAILABLE})
+    result = cv_pptx.generate(text, handler, profile, path.read_bytes())
+    return {"modele": model_key, **result}
 
 
 def letter_is_complete(text):
