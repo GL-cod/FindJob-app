@@ -24,7 +24,8 @@ def _cv_bytes():
     line(("camille.martin@example.com", False))
     line(("06 12 34 56 78  •  Lyon", False))
     line(("PROFIL", True))
-    line(("Diplômée de l’", False), ("École Exemple", True), (" : développement web et tests.", False))
+    line(("Diplômée de l’", False), ("École Exemple", True), (" : développement web et tests. Je recherche un poste de ", False),
+         ("développeuse junior", True), (".", False))
     line(("Société Test — Stagiaire développement", True))
     line(("2024 – 2025", False))
     line(("Développement :", True), (" création d’une application web en Python et React.", False))
@@ -66,7 +67,8 @@ def test_generate_keeps_only_allowed_changes_and_builds_a_valid_file():
             "dev": "création"}.items()}
     answer = json.dumps({"modifications": {
         ids["titre"]: "Développeuse fullstack junior (H/F)",
-        ids["profil"]: "Diplômée de l’**École Exemple** : développement web, React et tests.",
+        ids["profil"]: "Diplômée de l’**École Exemple** : développement web, React et tests. "
+                       "Je recherche un poste de **développeuse React chez ACME**.",   # « Je recherche » kept as is
         ids["langages"]: "**React**, Python, SQL.",          # bold added by Gemini: removed
         ids["mail"]: "pirate@example.com",                 # protected: ignored
         ids["dev"]: "x" * 400,                             # far too long: ignored
@@ -88,7 +90,9 @@ def test_generate_keeps_only_allowed_changes_and_builds_a_valid_file():
     profile_runs = next(sh for sh in out.slides[0].shapes if sh.text_frame.text.startswith("Diplômée")
                         ).text_frame.paragraphs[0].runs
     assert [(r.text, bool(r.font.bold)) for r in profile_runs] == [
-        ("Diplômée de l’", False), ("École Exemple", True), (" : développement web, React et tests.", False)]
+        ("Diplômée de l’", False), ("École Exemple", True),
+        (" : développement web, React et tests. Je recherche un poste de ", False),
+        ("développeuse junior", True), (".", False)]
     assert cv_pptx.diff(data, result["modifications"])[0][0] == "DÉVELOPPEUSE"
 
 
@@ -120,3 +124,19 @@ def test_models_on_disk_and_tracking(tmp_path):
     cv_pptx.delete_model(keys[0], tmp_path)
     with pytest.raises(RuntimeError):
         tracking.generate_cv(offer, gemini, "profil", keys[0], models_dir=tmp_path)
+
+
+def test_light_touch_rules():
+    segs = [{"id": f"x{i}", "text": f" texte numéro {i} assez long pour être modifié.", "editable": True,
+             "kind": "texte"} for i in range(10)]
+    changes = {f"x{i}": f"texte numéro {i} un peu reformulé ici." for i in range(10)}
+    assert len(cv_pptx.clean_changes(segs, changes)) == cv_pptx.MAX_CHANGES
+
+    old = "Ingénieur polyvalent. Je recherche un poste de **ingénieur informatique**."
+    assert cv_pptx._keep_looking_for(old, "Ingénieur polyvalent, orienté tests. Je recherche un poste de "
+                                          "**consultant PMO chez X**.") == \
+        "Ingénieur polyvalent, orienté tests. Je recherche un poste de **ingénieur informatique**."
+    assert cv_pptx._keep_looking_for(old, "Ingénieur orienté tests.") == \
+        "Ingénieur orienté tests. Je recherche un poste de **ingénieur informatique**."
+    segs = [{"id": "p", "text": old, "editable": True, "kind": "texte"}]
+    assert cv_pptx.clean_changes(segs, {"p": "Ingénieur polyvalent. Je recherche un CDI chez ACME."}) == {}

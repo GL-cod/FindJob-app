@@ -19,6 +19,9 @@ from pptx import Presentation
 ROOT = Path(__file__).resolve().parent.parent
 MODELS_DIR = ROOT / "data" / "cv_modeles"
 VIE_KEYS = ("vie_fr", "vie_en")
+MAX_CHANGES = 6   # a light touch: the CV must not look written for one offer
+_LOOKING = re.compile(r"(je recherche|je souhaite|je cherche|i am looking for|i'm looking for|i am seeking|"
+                      r"seeking a)", re.IGNORECASE)
 MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 
 _PHONE = re.compile(r"(\+?\d[\d .]{7,}\d)")
@@ -177,19 +180,26 @@ def cv_prompt(offer_text, profile, segs):
     titre = next((s["id"] for s in segs if s["kind"] == "titre"), None)
     full_cv = "\n".join(s["text"] for s in segs if s["text"].strip())
     return (
-        "Tu adaptes un CV existant à une offre d'emploi, sans changer sa mise en page.\n"
-        "On te donne des morceaux de texte du CV, chacun avec un identifiant. Réécris seulement ceux "
-        "qui gagnent à être adaptés à l'offre.\n"
+        "Tu ajustes légèrement un CV existant pour une offre d'emploi, sans changer sa mise en page.\n"
+        "Le CV doit rester généraliste : un recruteur ne doit pas avoir l'impression qu'il a été écrit pour "
+        "cette offre précise. Retouche peu, par petites touches.\n"
+        "On te donne des morceaux de texte du CV, chacun avec un identifiant.\n"
         "Règles strictes :\n"
         "- Garde la langue du CV.\n"
+        f"- Modifie au plus {MAX_CHANGES} morceaux, seulement ceux où le gain est net. Dans chacun, garde "
+        "l'essentiel du texte d'origine : réordonne une liste (le plus utile pour l'offre en premier), "
+        "remplace quelques mots, mets un élément pertinent un peu plus en avant. Ne réécris pas tout.\n"
+        "- Ne recopie pas l'intitulé ni les formules de l'offre, et ne cite pas l'entreprise.\n"
         "- N'invente RIEN : aucune expérience, compétence, outil, langage, chiffre, certification ou "
-        "responsabilité qui ne figure pas déjà dans le CV ou le profil. Tu peux reformuler, réordonner une "
-        "liste (le plus utile pour l'offre en premier), reprendre le vocabulaire de l'offre quand il décrit "
-        "la même chose, et mettre en avant ce qui correspond à l'offre.\n"
-        + (f"- {titre} est l'intitulé sous le nom : mets l'intitulé du poste visé, court (40 caractères max), "
-           "sans « H/F ».\n" if titre else "") +
-        "- Les passages entre ** ** sont en gras (ton école, le poste recherché). Garde le même nombre de "
-        "passages en gras au même endroit (le poste recherché peut changer) et n'en ajoute aucun.\n"
+        "responsabilité qui ne figure pas déjà dans le CV ou le profil.\n"
+        "- La phrase du profil qui dit ce que tu recherches (« Je recherche… », « I am looking for… ») "
+        "reste exactement telle quelle.\n"
+        + (f"- {titre} est l'intitulé sous le nom : garde-le, sauf si l'offre relève clairement d'une autre "
+           "famille de métiers ; dans ce cas mets un intitulé générique de cette famille (ex. « Ingénieur "
+           "logiciel », « Chef de projet IT »), jamais l'intitulé exact de l'offre, 40 caractères max.\n"
+           if titre else "") +
+        "- Les passages entre ** ** sont en gras (ton école, le poste recherché). Garde les mêmes passages "
+        "en gras et n'en ajoute aucun.\n"
         "- Respecte la longueur maximale de chaque morceau (en caractères), sinon la page déborde.\n"
         "- Ne touche pas aux morceaux que tu ne listes pas.\n"
         "- Réponds UNIQUEMENT avec un objet JSON, sans markdown :\n"
@@ -223,7 +233,9 @@ def clean_changes(segs, changes):
             continue
         old = seg["text"]
         new = " ".join(new.split())
-        if not new or new == old.strip():
+        if seg["kind"] != "titre":
+            new = _keep_looking_for(" ".join(old.split()), new)
+        if not new or new == " ".join(old.split()):
             continue
         if seg["kind"] == "titre":
             new = re.sub(r"\s*\(?\b[HFhf]\s*/\s*[HFhf]\b\)?", "", new).strip()
@@ -237,7 +249,22 @@ def clean_changes(segs, changes):
         lead = old[:len(old) - len(old.lstrip())]
         trail = old[len(old.rstrip()):]
         out[sid] = lead + new + trail
+        if len(out) >= MAX_CHANGES:
+            break
     return out
+
+
+def _keep_looking_for(old, new):
+    """The sentence saying which job is sought (« Je recherche… ») stays as in the model."""
+    m_old = _LOOKING.search(old)
+    if not m_old:
+        return new
+    tail = old[m_old.start():].strip()
+    m_new = _LOOKING.search(new)
+    head = (new[:m_new.start()] if m_new else new).rstrip()
+    if not head:
+        return None
+    return head + " " + tail
 
 
 def _limit_bold(text, allowed):
