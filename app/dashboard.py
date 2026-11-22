@@ -212,7 +212,7 @@ SHEET_TTL = 300
 def sheet_store():
     """Last copy of the Google Sheet, shared by every run; refreshed in a background thread."""
     import threading
-    return {"data": None, "fetched_at": 0.0, "fetching": False, "gen": 0, "lock": threading.Lock()}
+    return {"data": None, "fetched_at": 0.0, "fetching": False, "gen": 0, "lock": threading.Lock(), "pending": {}}
 
 
 SHEET = sheet_store()
@@ -243,9 +243,42 @@ def _store_sheet(store, data):
                 tmp.replace(SHEET_CACHE)
         except OSError:
             pass
+    apply_pending(data, store)
     store["data"] = data
     store["fetched_at"] = time.time()
     store["gen"] += 1
+
+
+def apply_pending(data, store=None):
+    """Changes clicked in the app but not yet confirmed by Google stay visible, even if a read comes back first."""
+    pending = (store or SHEET).setdefault("pending", {})
+    for r in (data or {}).get("rows", []):
+        fields = pending.get(r.get("row"))
+        if fields:
+            r.update(fields)
+
+
+def change_application(row, fields, label):
+    """Update one line of the Google Sheet: shown at once in the app, sent to Google in the background."""
+    store = SHEET
+    before = {k: row.get(k, "") for k in fields}
+    store.setdefault("pending", {}).setdefault(row["row"], {}).update(fields)
+    apply_pending(store["data"], store)
+    expect = row.get("poste") or ""
+
+    def send():
+        try:
+            sheets.update_row(row["row"], expect, fields)
+            return f"📗 « {label} » mis à jour dans ton Google Sheets"
+        except Exception as e:
+            for r in (store["data"] or {}).get("rows", []):     # not saved: show the real value again
+                if r.get("row") == row["row"]:
+                    r.update(before)
+            return f"⚠️ « {label} » : Google Sheets non mis à jour, réessaie ({str(e)[:120]})"
+        finally:
+            store["pending"].pop(row["row"], None)
+            _clear_sheet(wait=True)
+    run_later(send)
 
 
 def _refresh_sheet(store):
@@ -444,6 +477,105 @@ def save_filters():
                                            ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     except OSError:
         pass
+
+
+RETOUR_BUTTONS = {"⏳ En attente": "En attente", "✅ Positif": "Positif", "❌ Refusé": "Negatif"}
+RETOUR_LABEL = {v.lower(): k for k, v in RETOUR_BUTTONS.items()} | {"négatif": "❌ Refusé"}
+CARDS_PAGE = 20
+
+
+def _on_retour_click(row, key, label):
+    choice = st.session_state.get(key)
+    if not choice:                                    # clicked the selected button again: keep it
+        return
+    retour = RETOUR_BUTTONS[choice]
+    if retour.lower() != (row.get("retour") or "").strip().lower():
+        change_application(row, {"retour": retour}, label)
+        st.toast(f"« {label} » → {choice}")
+
+
+def _on_comment_save(row, key, label):
+    text = (st.session_state.get(key) or "").strip()
+    if text != (row.get("commentaire") or "").strip():
+        change_application(row, {"commentaire": text}, label)
+        st.toast(f"Commentaire enregistré pour « {label} »")
+
+
+def render_application_cards(rows, can_edit):
+    """One card per application with one-click Retour buttons (the Google Sheet follows in the background)."""
+    if not can_edit:
+        st.warning("Pour modifier ton Sheets depuis ici, mets à jour ton script Google "
+                   "(google_sheets/apps_script.gs) puis Déployer > Gérer les déploiements > Nouvelle version.")
+    def bucket(r):
+        return RETOUR_LABEL.get((r.get("retour") or "").strip().lower(), "Sans retour")
+    counts = {}
+    for r in rows:
+        counts[bucket(r)] = counts.get(bucket(r), 0) + 1
+    options = ["Toutes"] + [b for b in list(RETOUR_BUTTONS) + ["Sans retour"] if counts.get(b)]
+    g1, g2 = st.columns([3, 2])
+    pick = g1.segmented_control(
+        "Retour", options, default="Toutes", key="cards_filter", label_visibility="collapsed",
+        format_func=lambda o: f"Toutes ({len(rows)})" if o == "Toutes" else f"{o} ({counts.get(o, 0)})") or "Toutes"
+    q = g2.text_input("Rechercher", key="cards_q", placeholder="🔍 Poste, entreprise, commentaire...",
+                      label_visibility="collapsed").lower().strip()
+    shown = [r for r in rows
+             if (pick == "Toutes" or bucket(r) == pick)
+             and (not q or q in f"{r.get('poste','')} {r.get('entreprise','')} {r.get('commentaire','')}".lower())]
+    shown.sort(key=lambda r: int(r["n"]) if str(r.get("n", "")).isdigit() else 0, reverse=True)
+    if not shown:
+        st.caption("Aucune candidature ici.")
+        return
+    st.caption("Clique sur ⏳, ✅ ou ❌ pour donner la réponse de l'entreprise : c'est enregistré tout de suite "
+               "dans ton Google Sheets.")
+    limit = st.session_state.get("cards_limit", CARDS_PAGE)
+    hp = pf = None
+    for r in shown[:limit]:
+        label = f"{r.get('poste', '')} — {r.get('entreprise', '')}"[:60]
+        current = RETOUR_LABEL.get((r.get("retour") or "").strip().lower())
+        link = r.get("url") or r.get("lien") or ""
+        with st.container(border=True):
+            c1, c2, c3 = st.columns([6, 4, 1], vertical_alignment="center")
+            info = f"N° {r.get('n', '')}"
+            if r.get("date"):
+                info += f" · postulé le {r['date']}"
+            c1.markdown(f"**{r.get('poste', '') or '(sans intitulé)'}** — {r.get('entreprise', '')}  \n"
+                        f":gray[{info}]" + (f"  \n💬 _{r['commentaire']}_" if r.get("commentaire") else ""))
+            key = f"retour_{r['row']}_{current}"
+            c2.segmented_control("Retour", list(RETOUR_BUTTONS), default=current, key=key,
+                                 label_visibility="collapsed", disabled=not can_edit,
+                                 on_change=_on_retour_click, args=(dict(r), key, label))
+            with c3.popover("⋯", width="stretch"):
+                ckey = f"com_{r['row']}"
+                st.text_area("Commentaire", value=r.get("commentaire", ""), key=ckey, height=90,
+                             placeholder="Ex. : entretien le 28/11 avec la RH, relancé le...")
+                st.button("💾 Enregistrer le commentaire", key=f"comsave_{r['row']}", disabled=not can_edit,
+                          on_click=_on_comment_save, args=(dict(r), ckey, label), width="stretch")
+                if link:
+                    st.button("Ouvrir l'annonce ↗", key=f"open_{r['row']}", on_click=open_external, args=(link,),
+                              width="stretch")
+                prep_key = f"sheetprep_{r['row']}"
+                if st.button("🎯 Préparer l'entretien", key=f"btn_{prep_key}", width="stretch"):
+                    if hp is None:
+                        hp, pf = gemini_and_profile()
+                    if hp is None:
+                        st.error("Gemini n'est pas configuré.")
+                    else:
+                        with st.spinner("Préparation de l'entretien..."):
+                            try:
+                                pseudo = {"id": f"sheet_{r['row']}", "title": r.get("poste", ""),
+                                          "company": r.get("entreprise", ""), "url": link,
+                                          "source": stats.source_of(link)}
+                                st.session_state[prep_key] = tracking.generate_interview_prep(
+                                    pseudo, hp, pf, description="")
+                            except Exception as e:
+                                st.error(f"Impossible de préparer l'entretien : {e}")
+            if st.session_state.get(f"sheetprep_{r['row']}"):
+                with st.expander("🎯 Préparation de l'entretien", expanded=True):
+                    st.markdown(st.session_state[f"sheetprep_{r['row']}"])
+    if len(shown) > limit:
+        if st.button(f"Afficher plus ({len(shown) - limit} restante(s))", key="cards_more"):
+            st.session_state.cards_limit = limit + CARDS_PAGE
+            st.rerun()
 
 
 def mark_todo(offer):
@@ -924,100 +1056,105 @@ with tab_sheet:
                        "Mets-le à jour (voir le message de Claude ou google_sheets/apps_script.gs), puis "
                        "Déployer > Gérer les déploiements > crayon > Nouvelle version.")
 
-        retours = sorted({(r.get("retour") or "Sans retour") for r in rows})
-        g1, g2 = st.columns([2, 3])
-        pick = g1.multiselect("Retour", retours, default=retours)
-        q2 = g2.text_input("Rechercher (poste, entreprise, commentaire)", key="sheet_q").lower().strip()
-        table = [
-            {"_row": r.get("row"), "N": r.get("n", ""), "Poste": r.get("poste", ""),
-             "Entreprise": r.get("entreprise", ""), "Date": r.get("date", ""), "Retour": r.get("retour") or "",
-             "Lien": r.get("url") or r.get("lien") or "", "Commentaire": r.get("commentaire", "")}
-            for r in rows
-            if (r.get("retour") or "Sans retour") in pick
-            and (not q2 or q2 in f"{r.get('poste','')} {r.get('entreprise','')} {r.get('commentaire','')}".lower())
-        ]
-        table.sort(key=lambda r: int(r["N"]) if str(r["N"]).isdigit() else 0, reverse=True)
-        columns = ["N", "Poste", "Entreprise", "Date", "Retour", "Lien", "Commentaire"]
-
-        can_edit = sheet["version"] >= 3
-        edit_mode = st.toggle("✏️ Modifier", key="sheet_edit_mode", disabled=not can_edit,
-                              help="Modifie les cases directement, puis enregistre : ton Google Sheets est mis à jour."
-                              if can_edit else "Mets d'abord ton script Google à jour (version 3).")
-        if not can_edit:
-            st.caption("Pour modifier ton Sheets depuis ici, mets à jour ton script Google "
-                       "(google_sheets/apps_script.gs) puis Déployer > Gérer les déploiements > Nouvelle version.")
-
-        if edit_mode:
-            import pandas as pd
-            before = pd.DataFrame(table, columns=["_row"] + columns)
-            choices = sorted(set(sheets.RETOUR_CHOICES) | {r["Retour"] for r in table})
-            edited = st.data_editor(
-                before, key="sheet_editor", hide_index=True, width="stretch", height=480, num_rows="fixed",
-                column_order=columns, disabled=["N"],
-                column_config={
-                    "N": st.column_config.TextColumn("N", width="small"),
-                    "Retour": st.column_config.SelectboxColumn("Retour", options=choices, width="small"),
-                    "Date": st.column_config.TextColumn("Date", width="small", help="jj/mm/aaaa"),
-                    "Lien": st.column_config.TextColumn("Lien", width="medium"),
-                    "Commentaire": st.column_config.TextColumn("Commentaire", width="large"),
-                },
-            )
-            changes = sheets.diff_rows(table, edited.fillna("").to_dict("records"))
-            s1, s2 = st.columns([2, 3])
-            if s1.button(f"💾 Enregistrer ({len(changes)} modification(s))", type="primary", disabled=not changes):
-                done, failed = 0, []
-                with st.spinner("Mise à jour du Google Sheets..."):
-                    for row_n, poste, fields in changes:
-                        try:
-                            sheets.update_row(row_n, poste, fields)
-                            done += 1
-                        except Exception as e:
-                            failed.append(f"ligne {row_n} ({poste[:30]}) : {e}")
-                    read_sheet.clear(wait=True)
-                st.session_state.pop("sheet_editor", None)
-                st.session_state.sheet_save_result = (done, failed)
-                st.rerun()
-            if changes:
-                s2.caption("Modifications pas encore envoyées : clique sur Enregistrer.")
+        view_mode = st.segmented_control("Affichage", ["🗂️ Cartes", "📋 Tableau"], default="🗂️ Cartes",
+                                         key="sheet_view", label_visibility="collapsed") or "🗂️ Cartes"
+        if view_mode == "🗂️ Cartes":
+            render_application_cards(rows, sheet["version"] >= 3)
         else:
-            st.caption("Clique sur une ligne pour la sélectionner, puis sur « Ouvrir l'annonce ».")
-            import pandas as pd
-            view = pd.DataFrame(table, columns=["_row"] + columns)
-            event = st.dataframe(
-                view.style.apply(sheets.row_style, axis=1, dark=IS_DARK), hide_index=True, width="stretch", height=480,
-                key="sheet_table",
-                column_order=columns, on_select="rerun", selection_mode="single-row",
-                column_config={
-                    "N": st.column_config.TextColumn("N", width="small"),
-                    "Lien": st.column_config.TextColumn("Lien", width="medium"),
-                    "Retour": st.column_config.TextColumn("Retour", width="small"),
-                    "Date": st.column_config.TextColumn("Date", width="small"),
-                },
-            )
-            picked = event.selection.rows if event and event.selection else []
-            if picked:
-                row = table[picked[0]]
-                label = f"{row['Poste']} — {row['Entreprise']}"
-                if row["Lien"]:
-                    st.button(f"Ouvrir l'annonce ↗  ({label[:70]})", key="open_sheet_row",
-                              on_click=open_external, args=(row["Lien"],), type="primary")
-                else:
-                    st.caption(f"« {label[:70]} » n'a pas de lien dans ton Sheets.")
-                hp, pf = gemini_and_profile()
-                prep_key = f"sheetprep_{row['_row']}"
-                if hp is not None and st.button(f"🎯 Préparer l'entretien ({label[:50]})", key=f"btn_{prep_key}"):
-                    with st.spinner("Préparation de l'entretien..."):
-                        try:
-                            pseudo = {"id": f"sheet_{row['_row']}", "title": row["Poste"], "company": row["Entreprise"],
-                                      "url": row["Lien"], "source": stats.source_of(row["Lien"])}
-                            st.session_state[prep_key] = tracking.generate_interview_prep(pseudo, hp, pf, description="")
-                        except Exception as e:
-                            st.error(f"Impossible de préparer l'entretien : {e}")
-                if st.session_state.get(prep_key):
-                    with st.container(border=True):
-                        st.markdown(st.session_state[prep_key])
-                    st.caption("Préparation faite à partir du seul intitulé : ajoute l'annonce dans l'application "
-                               "pour une fiche plus précise.")
+            retours = sorted({(r.get("retour") or "Sans retour") for r in rows})
+            g1, g2 = st.columns([2, 3])
+            pick = g1.multiselect("Retour", retours, default=retours)
+            q2 = g2.text_input("Rechercher (poste, entreprise, commentaire)", key="sheet_q").lower().strip()
+            table = [
+                {"_row": r.get("row"), "N": r.get("n", ""), "Poste": r.get("poste", ""),
+                 "Entreprise": r.get("entreprise", ""), "Date": r.get("date", ""), "Retour": r.get("retour") or "",
+                 "Lien": r.get("url") or r.get("lien") or "", "Commentaire": r.get("commentaire", "")}
+                for r in rows
+                if (r.get("retour") or "Sans retour") in pick
+                and (not q2 or q2 in f"{r.get('poste','')} {r.get('entreprise','')} {r.get('commentaire','')}".lower())
+            ]
+            table.sort(key=lambda r: int(r["N"]) if str(r["N"]).isdigit() else 0, reverse=True)
+            columns = ["N", "Poste", "Entreprise", "Date", "Retour", "Lien", "Commentaire"]
+
+            can_edit = sheet["version"] >= 3
+            edit_mode = st.toggle("✏️ Modifier", key="sheet_edit_mode", disabled=not can_edit,
+                                  help="Modifie les cases directement, puis enregistre : ton Google Sheets est mis à jour."
+                                  if can_edit else "Mets d'abord ton script Google à jour (version 3).")
+            if not can_edit:
+                st.caption("Pour modifier ton Sheets depuis ici, mets à jour ton script Google "
+                           "(google_sheets/apps_script.gs) puis Déployer > Gérer les déploiements > Nouvelle version.")
+
+            if edit_mode:
+                import pandas as pd
+                before = pd.DataFrame(table, columns=["_row"] + columns)
+                choices = sorted(set(sheets.RETOUR_CHOICES) | {r["Retour"] for r in table})
+                edited = st.data_editor(
+                    before, key="sheet_editor", hide_index=True, width="stretch", height=480, num_rows="fixed",
+                    column_order=columns, disabled=["N"],
+                    column_config={
+                        "N": st.column_config.TextColumn("N", width="small"),
+                        "Retour": st.column_config.SelectboxColumn("Retour", options=choices, width="small"),
+                        "Date": st.column_config.TextColumn("Date", width="small", help="jj/mm/aaaa"),
+                        "Lien": st.column_config.TextColumn("Lien", width="medium"),
+                        "Commentaire": st.column_config.TextColumn("Commentaire", width="large"),
+                    },
+                )
+                changes = sheets.diff_rows(table, edited.fillna("").to_dict("records"))
+                s1, s2 = st.columns([2, 3])
+                if s1.button(f"💾 Enregistrer ({len(changes)} modification(s))", type="primary", disabled=not changes):
+                    done, failed = 0, []
+                    with st.spinner("Mise à jour du Google Sheets..."):
+                        for row_n, poste, fields in changes:
+                            try:
+                                sheets.update_row(row_n, poste, fields)
+                                done += 1
+                            except Exception as e:
+                                failed.append(f"ligne {row_n} ({poste[:30]}) : {e}")
+                        read_sheet.clear(wait=True)
+                    st.session_state.pop("sheet_editor", None)
+                    st.session_state.sheet_save_result = (done, failed)
+                    st.rerun()
+                if changes:
+                    s2.caption("Modifications pas encore envoyées : clique sur Enregistrer.")
+            else:
+                st.caption("Clique sur une ligne pour la sélectionner, puis sur « Ouvrir l'annonce ».")
+                import pandas as pd
+                view = pd.DataFrame(table, columns=["_row"] + columns)
+                event = st.dataframe(
+                    view.style.apply(sheets.row_style, axis=1, dark=IS_DARK), hide_index=True, width="stretch", height=480,
+                    key="sheet_table",
+                    column_order=columns, on_select="rerun", selection_mode="single-row",
+                    column_config={
+                        "N": st.column_config.TextColumn("N", width="small"),
+                        "Lien": st.column_config.TextColumn("Lien", width="medium"),
+                        "Retour": st.column_config.TextColumn("Retour", width="small"),
+                        "Date": st.column_config.TextColumn("Date", width="small"),
+                    },
+                )
+                picked = event.selection.rows if event and event.selection else []
+                if picked:
+                    row = table[picked[0]]
+                    label = f"{row['Poste']} — {row['Entreprise']}"
+                    if row["Lien"]:
+                        st.button(f"Ouvrir l'annonce ↗  ({label[:70]})", key="open_sheet_row",
+                                  on_click=open_external, args=(row["Lien"],), type="primary")
+                    else:
+                        st.caption(f"« {label[:70]} » n'a pas de lien dans ton Sheets.")
+                    hp, pf = gemini_and_profile()
+                    prep_key = f"sheetprep_{row['_row']}"
+                    if hp is not None and st.button(f"🎯 Préparer l'entretien ({label[:50]})", key=f"btn_{prep_key}"):
+                        with st.spinner("Préparation de l'entretien..."):
+                            try:
+                                pseudo = {"id": f"sheet_{row['_row']}", "title": row["Poste"], "company": row["Entreprise"],
+                                          "url": row["Lien"], "source": stats.source_of(row["Lien"])}
+                                st.session_state[prep_key] = tracking.generate_interview_prep(pseudo, hp, pf, description="")
+                            except Exception as e:
+                                st.error(f"Impossible de préparer l'entretien : {e}")
+                    if st.session_state.get(prep_key):
+                        with st.container(border=True):
+                            st.markdown(st.session_state[prep_key])
+                        st.caption("Préparation faite à partir du seul intitulé : ajoute l'annonce dans l'application "
+                                   "pour une fiche plus précise.")
 
         result = st.session_state.pop("sheet_save_result", None)
         if result:
