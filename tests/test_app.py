@@ -199,7 +199,8 @@ def test_feedback_store_and_prompts(tmp_path, monkeypatch):
     entries = feedback.load()
     assert [e["id"] for e in entries] == ["li_2", "hw_1"] and entries[1]["reason"] == "trop commercial, pas technique"
     block = feedback.prompt_block()
-    assert "Business Developer (A) : trop commercial, pas technique" in block and "Technicien support N1 (B)\n" in block
+    assert "Business Developer (A) : trop commercial, pas technique" in block
+    assert "Technicien support" not in block          # no reason given: the filter ignores it
 
     # CDI prompt carries it
     p = cdi_relevance.relevance_prompt({"title": "x"}, "profil", 3, [], block)
@@ -216,6 +217,7 @@ def test_feedback_store_and_prompts(tmp_path, monkeypatch):
 
     feedback.forget("hw_1")
     assert [e["id"] for e in feedback.load()] == ["li_2"]
+    assert feedback.prompt_block() == ""               # only reason-less entries left: nothing for Gemini
 
 
 def test_gitsync_pushes_feedback(tmp_path):

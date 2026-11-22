@@ -4,6 +4,7 @@ Start it with windows/start_app.ps1 (desktop shortcut), or:
     .venv\\Scripts\\python -m streamlit run app/dashboard.py
 """
 import hashlib
+import json
 import os
 import time
 import subprocess
@@ -47,6 +48,9 @@ MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août
 SORTS = ["Meilleure note d'abord", "Plus récentes d'abord", "Nouvelles dans l'application d'abord",
          "Entreprise (A → Z)"]
 HIDE_AFTER_DAYS = 14  # offers left « À regarder » this long after first shown in the app are hidden
+FILTERS_PATH = ROOT / "data" / "filtres_offres.json"   # last filters of the Offres tab (local, git-ignored)
+FILTER_DEFAULTS = {"flt_sources": SOURCES, "flt_statuses": ["À regarder", "Entretien"],
+                   "flt_sort": SORTS[0], "flt_old": False}
 
 st.set_page_config(page_title="Mes candidatures", page_icon="💼", layout="wide")
 # No greying of the page while it updates after a click
@@ -319,8 +323,16 @@ def push_feedback():
 
 
 def save_rejection(offer, reason):
-    feedback.record(offer, reason)
-    st.toast("Noté : le filtre évitera ce genre d'offres (VIE, HelloWork, LinkedIn et APEC).")
+    """Teach the filter only when a reason was written; « Passer » or an empty reason teaches nothing."""
+    reason = (reason or "").strip()
+    had_entry = any(e.get("id") == offer.get("id") for e in feedback.load())
+    if reason:
+        feedback.record(offer, reason)
+        st.toast("Noté : le filtre évitera ce genre d'offres (VIE, HelloWork, LinkedIn et APEC).")
+    elif had_entry:
+        feedback.forget(offer["id"])            # an old entry without reason: drop it from the filter
+    else:
+        return                                  # nothing to learn, nothing to push
 
     def send():
         ok, _ = push_feedback()
@@ -331,7 +343,8 @@ def save_rejection(offer, reason):
 @st.dialog("Pourquoi cette offre ne t'intéresse pas ?")
 def ask_reason(offer):
     st.markdown(f"**{offer.get('title', '')}** — {offer.get('company', '')}")
-    st.caption("Ta réponse aide le filtre à écarter les offres du même genre (VIE, HelloWork et LinkedIn).")
+    st.caption("Ta réponse aide le filtre à écarter les offres du même genre (VIE, HelloWork et LinkedIn). "
+               "Sans raison (« Passer »), l'offre est juste masquée : le filtre n'en tient pas compte.")
     why = st.text_input("Raison", key="dialog_reason",
                         placeholder="Ex. : trop commercial, que du support, trop loin, trop senior...")
     c1, c2 = st.columns(2)
@@ -402,6 +415,37 @@ def render_cv(o, handler, profile):
                 st.error(f"Impossible d'adapter le CV : {e}")
 
 
+def load_filters():
+    """Put the saved filters of the Offres tab in the session, once, keeping only values that still exist."""
+    if st.session_state.get("_filters_loaded"):
+        return
+    st.session_state._filters_loaded = True
+    try:
+        saved = json.loads(FILTERS_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        saved = {}
+    choices = {"flt_sources": SOURCES, "flt_statuses": tracking.STATUSES}
+    for key, default in FILTER_DEFAULTS.items():
+        value = saved.get(key, default) if isinstance(saved, dict) else default
+        if key in choices:
+            value = [v for v in value if v in choices[key]] if isinstance(value, list) else default
+        elif key == "flt_sort" and value not in SORTS:
+            value = default
+        elif key == "flt_old":
+            value = bool(value)
+        st.session_state.setdefault(key, value)
+
+
+def save_filters():
+    """Called when a filter changes: the next opening of the app starts with the same filters."""
+    try:
+        FILTERS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        FILTERS_PATH.write_text(json.dumps({k: st.session_state.get(k, d) for k, d in FILTER_DEFAULTS.items()},
+                                           ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
 def mark_todo(offer):
     st.session_state[f"status_{offer['id']}"] = "À regarder"
     on_status_change(offer)
@@ -422,9 +466,8 @@ def on_status_change(offer):
     previous = offer.get("status")
     save_field(offer, status=new)
     if new == "Pas intéressé":
-        feedback.record(offer, "")              # kept locally at once; reason + push from the dialog
-        st.session_state.ask_reason = offer
-    elif previous == "Pas intéressé":
+        st.session_state.ask_reason = offer     # the filter learns only if a reason is written in the dialog
+    elif previous == "Pas intéressé" and any(e.get("id") == offer["id"] for e in feedback.load()):
         feedback.forget(offer["id"])
         run_later(lambda: (push_feedback(), None)[1])
     title = offer["title"][:40]
@@ -678,13 +721,14 @@ tab_offres, tab_sheet, tab_reseau, tab_stats, tab_activite, tab_reglages = st.ta
 with tab_offres:
     query = st.text_input("Rechercher", placeholder="🔍 Intitulé, entreprise, ville...", label_visibility="collapsed")
     f1, f2, f3, f4 = st.columns([3, 3, 2, 1])
-    sources = f1.multiselect("Source", SOURCES, default=SOURCES)
-    statuses = f2.multiselect("Statut", tracking.STATUSES, default=["À regarder", "Entretien"],
+    load_filters()   # filters are remembered between sessions (data/filtres_offres.json)
+    sources = f1.multiselect("Source", SOURCES, key="flt_sources", on_change=save_filters)
+    statuses = f2.multiselect("Statut", tracking.STATUSES, key="flt_statuses", on_change=save_filters,
                               help="Les offres où tu as postulé sont masquées par défaut : ajoute « Candidaté » "
                                    "pour les revoir, ou va dans l'onglet 📗 Mes candidatures.")
-    sort_by = f3.selectbox("Trier", SORTS)
+    sort_by = f3.selectbox("Trier", SORTS, key="flt_sort", on_change=save_filters)
     with f4.popover("⚙️ Plus", width="stretch"):
-        show_old = st.toggle(f"Offres de plus de {HIDE_AFTER_DAYS} jours",
+        show_old = st.toggle(f"Offres de plus de {HIDE_AFTER_DAYS} jours", key="flt_old", on_change=save_filters,
                              help=f"Affiche aussi les offres restées « À regarder » plus de {HIDE_AFTER_DAYS} jours "
                                   "après leur arrivée dans l'application")
 

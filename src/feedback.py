@@ -50,17 +50,14 @@ def forget(offer_id, path=None):
 
 def prompt_block(entries=None, lang="fr"):
     """Text appended to a Gemini prompt; empty when there is no feedback yet."""
-    entries = (entries if entries is not None else load())[-MAX_IN_PROMPT:]
+    entries = entries if entries is not None else load()
+    # Only rejections with a written reason teach the filter; a bare « Pas intéressé » just hides the offer.
+    entries = [e for e in entries if (e.get("reason") or "").strip()][-MAX_IN_PROMPT:]
     if not entries:
         return ""
-    lines = []
-    for e in entries:
-        line = f"- {e.get('title', '')} ({e.get('company', '')})"
-        if e.get("reason"):
-            line += f" : {e['reason']}"
-        lines.append(line)
-    head = ("Offres que le candidat a déjà refusées, avec sa raison quand il l'a donnée. "
+    lines = [f"- {e.get('title', '')} ({e.get('company', '')}) : {e['reason'].strip()}" for e in entries]
+    head = ("Offres que le candidat a déjà refusées, avec sa raison. "
             "Réponds NON aux offres du même genre (même type de poste, même raison) :\n") if lang == "fr" else (
-            "Offers the candidate has already turned down, with his reason when given. "
+            "Offers the candidate has already turned down, with his reason. "
             "Answer NO to offers of the same kind (same type of role, same reason):\n")
     return head + "\n".join(lines) + "\n\n"
