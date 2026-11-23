@@ -534,3 +534,60 @@ def test_code_changed_ignores_offer_updates(tmp_path):
     assert gitsync.code_changed(r, b, c) and gitsync.code_changed(r, a, c)
     assert not gitsync.code_changed(r, c, c)
     assert gitsync.last_update(r)
+
+
+def test_gitsync_updates_from_the_original(tmp_path):
+    """The app sees a new version on the original, installs only the code, keeps data and settings."""
+    import subprocess
+    from src import gitsync
+
+    def run(cwd, *a):
+        subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True)
+
+    def write(root, rel, text):
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text)
+
+    original, copy, pc = tmp_path / "original", tmp_path / "copy.git", tmp_path / "pc"
+    run(tmp_path, "init", "-q", "-b", "main", str(original))
+    for k, v in (("user.name", "bot"), ("user.email", "b@x")):
+        run(original, "config", k, v)
+    write(original, "src/a.py", "v1\n")
+    write(original, "src/old.py", "old\n")
+    write(original, "cdi_search.yaml", "keywords: [exemple]\n")
+    write(original, "data/offers.json", "{}\n")
+    run(original, "add", "."); run(original, "commit", "-qm", "v1")
+    run(tmp_path, "clone", "-q", "--bare", str(original), str(copy))      # the user's own GitHub copy
+    run(tmp_path, "clone", "-q", str(copy), str(pc))                       # the app on the user's PC
+    write(pc, "cdi_search.yaml", "keywords: [mes mots]\n")
+    write(pc, "data/offers.json", '{"1": {}}\n')
+    run(pc, "-c", "user.name=u", "-c", "user.email=u@x", "commit", "-qam", "mes réglages")
+    run(pc, "push", "-q", "origin", "HEAD:main")
+
+    status = gitsync.check_original(pc, url=str(original))
+    assert status["available"] is False                                   # same code: nothing to show
+
+    write(original, "src/a.py", "v2\n")
+    write(original, "src/new.py", "new\n")
+    (original / "src" / "old.py").unlink()
+    write(original, "cdi_search.yaml", "keywords: [autre]\n")             # never copied
+    run(original, "add", "-A"); run(original, "commit", "-qm", "v2")
+
+    status = gitsync.check_original(pc, url=str(original))
+    assert status["available"] is True and status["files"] == 3
+
+    ok, msg = gitsync.install_original(pc, url=str(original))
+    assert ok, msg
+    assert (pc / "src" / "a.py").read_text() == "v2\n" and (pc / "src" / "new.py").exists()
+    assert not (pc / "src" / "old.py").exists()
+    assert "mes mots" in (pc / "cdi_search.yaml").read_text()
+    assert (pc / "data" / "offers.json").read_text() == '{"1": {}}\n'
+    pushed = subprocess.run(["git", "show", "main:src/a.py"], cwd=copy, capture_output=True, text=True).stdout
+    assert pushed == "v2\n"                                               # the user's GitHub copy has it too
+    assert gitsync.check_original(pc, url=str(original))["available"] is False
+
+
+def test_gitsync_source_repos_never_look_for_updates(monkeypatch, tmp_path):
+    from src import gitsync
+    monkeypatch.setattr(gitsync, "repo_url", lambda root: "https://github.com/GL-cod/FindJob")
+    assert gitsync.check_original(tmp_path) is None

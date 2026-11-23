@@ -108,6 +108,81 @@ def push_file(root, relpath, message):
     return git(root, "push", "origin", "HEAD:main")
 
 
+# ------------------------------------------------------------------ updates from the original
+# Each user has his own copy of the public repo. New versions are published on the original:
+# the app compares its code with it, and installs it in one click (same files as the GitHub
+# workflow « Mettre à jour depuis l'original »: code only, never data/ nor cdi_search.yaml).
+ORIGINAL = "https://github.com/GL-cod/FindJob-app"
+ORIGINAL_REF = "refs/findjob/original"
+CODE_PATHS = ["app", "src", "windows", "tests", "google_sheets", ".streamlit", "requirements.txt",
+              "requirements-app.txt", "cdi_search.exemple.yaml", "README.md", "INSTALLATION.md",
+              "docs/index.html", ".gitignore"]
+# The repos the updates come from: they never look for updates themselves.
+SOURCE_REPOS = ("https://github.com/gl-cod/findjob", "https://github.com/gl-cod/findjob-app")
+
+
+def original_url():
+    import os
+    return (os.environ.get("FINDJOB_ORIGINAL") or ORIGINAL).strip().rstrip("/")
+
+
+def is_source_repo(root):
+    return repo_url(root).lower() in SOURCE_REPOS
+
+
+def code_differences(root, ref):
+    """[(status, path)] of code files that differ between this copy and `ref` (A = new file)."""
+    ok, out = git(root, "diff", "--no-renames", "--name-status", "HEAD", ref, "--", *CODE_PATHS)
+    if not ok:
+        return []
+    return [tuple(line.split("\t", 1)) for line in out.splitlines() if "\t" in line]
+
+
+def check_original(root, url=None):
+    """Is a new version published on the original? Returns None (can't tell: offline, source
+    repo...) or {"available": bool, "files": n, "date": "24/11 à 00h50"}."""
+    if is_source_repo(root):
+        return None
+    url = url or original_url()
+    ok, _ = git(root, "fetch", "--quiet", "--depth", "1", "--no-tags", url, f"+main:{ORIGINAL_REF}", timeout=60)
+    if not ok:
+        return None
+    files = code_differences(root, ORIGINAL_REF)
+    ok, date = git(root, "log", "-1", "--format=%cd", "--date=format:%d/%m à %Hh%M", ORIGINAL_REF)
+    return {"available": bool(files), "files": len(files), "date": date.strip() if ok else ""}
+
+
+def install_original(root, url=None):
+    """Copy the original's code into this copy, commit it and push it to the user's GitHub repo
+    (so the GitHub searches run the new code too). Returns (ok, message)."""
+    url = url or original_url()
+    pull(root)
+    ok, out = git(root, "fetch", "--quiet", "--depth", "1", "--no-tags", url, f"+main:{ORIGINAL_REF}", timeout=120)
+    if not ok:
+        return False, f"impossible de joindre {url} : {out}"
+    changes = code_differences(root, ORIGINAL_REF)
+    if not changes:
+        return True, "déjà à jour"
+    removed = [p for st, p in changes if st.startswith("D")]
+    kept = [p for st, p in changes if not st.startswith("D")]
+    if removed:
+        git(root, "rm", "-q", "--", *removed)
+    if kept:
+        ok, out = git(root, "checkout", ORIGINAL_REF, "--", *kept)
+        if not ok:
+            return False, out
+    ok, out = git(root, *WHO, "commit", "-q", "-m", f"Mise à jour du code depuis {url} [skip ci]")
+    if not ok:
+        return False, out
+    for _ in range(3):
+        ok, out = git(root, "push", "origin", "HEAD:main")
+        if ok:
+            return True, f"{len(changes)} fichier(s) mis à jour"
+        git(root, "pull", "--rebase", "origin", "main")
+    return True, ("mise à jour installée sur ce PC, mais pas encore envoyée sur GitHub "
+                  f"(elle partira au prochain envoi) : {out[-200:]}")
+
+
 if __name__ == "__main__":
     ok, out = pull(Path(__file__).resolve().parent.parent)
     print(("git: " if ok else "git ERROR: ") + out)

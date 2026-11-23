@@ -141,6 +141,29 @@ def tracked_pull():
     return ok, out
 
 
+UPDATE_CHECK_HOURS = 6
+
+
+@st.cache_resource
+def original_state():
+    """New version published on the original repo? Checked at start, then every few hours."""
+    return {"checked": 0.0, "status": None, "toasted": False}
+
+
+def check_original(force=False):
+    """Background task: compare the app's code with the original (no click needed)."""
+    s = original_state()
+    if not force and time.time() - s["checked"] < UPDATE_CHECK_HOURS * 3600:
+        return None
+    s["checked"] = time.time()
+    with background()["git_lock"]:
+        s["status"] = gitsync.check_original(ROOT)
+    if s["status"] and s["status"]["available"] and not s["toasted"]:
+        s["toasted"] = True
+        return "✨ Nouvelle version de l'application disponible : « Installer la mise à jour » dans la barre de gauche."
+    return None
+
+
 def startup_pull():
     """git pull done in the background when the window opens: the page shows the offers already
     on the PC at once, and reloads by itself if GitHub had new ones."""
@@ -183,6 +206,16 @@ def restart_server():
         return True, ""
     except Exception as e:
         return False, f"{err} / {e}"
+
+
+def restart_after_update():
+    started, err = restart_server()
+    if started:
+        st.info("🔄 L'application redémarre : la fenêtre se recharge toute seule dans 10 à 20 secondes. "
+                "Si rien ne se passe au bout d'une minute, ferme la fenêtre et rouvre l'icône.")
+    else:
+        st.error(f"Redémarrage automatique impossible ({err[-200:]}). La mise à jour est installée : "
+                 "ferme la fenêtre, lance windows\\stop_app.ps1 puis rouvre l'icône.")
 
 
 def sync_github(show=True):
@@ -682,6 +715,7 @@ def auto_refresh():
         st.session_state.data_sig = data_signature()
     else:
         st.session_state.last_check_ts = now
+        run_later(check_original)   # does nothing until UPDATE_CHECK_HOURS have passed
         changed = tracking.check_for_updates(st.session_state, signature=data_signature,
                                              pull=tracked_pull, clear=read_sheet.clear)
         if changed:
@@ -696,6 +730,7 @@ def auto_refresh():
 if "synced" not in st.session_state:
     st.session_state.synced = True
     run_later(startup_pull)   # in the background: the page shows what is already on the PC at once
+    run_later(check_original)
 
 for _msg in st.session_state.pop("toasts", []):
     st.toast(_msg)
@@ -798,24 +833,29 @@ with st.sidebar:
     st.divider()
     st.markdown("### ⬆️ Application")
     pending = update_state().get("pending")
-    if pending:
-        st.success("✨ Une nouvelle version a été téléchargée.")
-    if st.button("⬆️ Mettre à jour l'application", width="stretch", type="primary" if pending else "secondary",
-                 help="Récupère la dernière version depuis GitHub et redémarre l'application (10 secondes environ)"):
-        with st.spinner("Téléchargement de la dernière version..."):
-            ok, out = tracked_pull()
-        if ok:
-            started, err = restart_server()
-            if started:
-                st.info("🔄 L'application redémarre : la fenêtre se recharge toute seule dans 10 à 20 secondes. "
-                        "Si rien ne se passe au bout d'une minute, ferme la fenêtre et rouvre l'icône.")
+    original = original_state()["status"]
+    if original and original["available"]:
+        st.success("✨ Nouvelle version disponible" + (f" (publiée le {original['date']})" if original["date"] else ""))
+        if st.button("⬆️ Installer la mise à jour", width="stretch", type="primary",
+                     help="Récupère la nouvelle version, l'envoie sur ta copie GitHub et redémarre "
+                          "l'application (20 secondes environ). Tes offres et tes réglages ne changent pas."):
+            with st.spinner("Installation de la nouvelle version..."):
+                with background()["git_lock"]:
+                    ok, out = gitsync.install_original(ROOT)
+            if ok:
+                original_state().update(status=None, toasted=False, checked=0.0)
+                app_version.clear()
+                restart_after_update()
             else:
-                st.error(f"Redémarrage automatique impossible ({err[-200:]}). La mise à jour est téléchargée : "
-                         "ferme la fenêtre, lance windows\\stop_app.ps1 puis rouvre l'icône.")
-        else:
-            st.error(f"Mise à jour impossible : {out[-300:]}")
+                st.error(f"Mise à jour impossible : {out[-300:]}")
+    elif pending:
+        st.success("✨ Une nouvelle version a été téléchargée.")
+        if st.button("🔄 Redémarrer pour l'appliquer", width="stretch", type="primary"):
+            restart_after_update()
     _version = app_version()
-    if _version:
+    if original is not None and not original["available"] and not pending:
+        st.caption("✅ Application à jour" + (f" · version du {_version}" if _version else ""))
+    elif _version:
         st.caption(f"Version du {_version}")
     st.divider()
     with st.expander("ℹ️ Légende des statuts"):

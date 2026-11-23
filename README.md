@@ -184,10 +184,9 @@ Si le test renvoie `401`, le jeton est faux ou il manque `Bearer ` devant. `403`
 
 ## Recevoir les mises à jour
 
-Quand une nouvelle version de l'application sort :
+Rien à surveiller : l'application vérifie toute seule, à l'ouverture puis toutes les 6 heures, si une nouvelle version est sortie. Quand c'est le cas, un message s'affiche et le bouton **⬆️ Installer la mise à jour** apparaît dans la barre de gauche. Un clic suffit : la nouvelle version est installée sur ton PC et envoyée sur ta copie GitHub, sans toucher à tes offres ni à tes réglages, puis l'application redémarre. Tant qu'il n'y a rien de nouveau, la barre de gauche indique simplement « ✅ Application à jour ».
 
-1. Sur GitHub, dans ta copie, ouvre **Actions**, puis **Mettre à jour depuis l'original**, puis **Run workflow** et **Run workflow**. Le workflow récupère le nouveau code sans toucher à tes offres ni à tes réglages.
-2. Dans l'application, clique sur **⬆️ Mettre à jour l'application** dans la barre de gauche.
+Autre possibilité, sans l'application : sur GitHub, dans ta copie, **Actions** → **Mettre à jour depuis l'original** → **Run workflow**.
 
 Si tu as fait un fork, le bouton **Sync fork** de la page de ton dépôt marche aussi, et il récupère en plus les workflows (dossier `.github`).
 

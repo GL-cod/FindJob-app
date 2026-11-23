@@ -116,8 +116,10 @@ Rien n'est collecté ni envoyé automatiquement (comptes LinkedIn bloqués, RGPD
   si l'heure est passée). Journal : `logs\linkedin.log`.
 - **Réglages** : `cdi_search.yaml`, modifiable sur GitHub. Le PC récupère les
   changements à chaque passage.
-- **Mises à jour** : bouton « ⬆️ Mettre à jour l'application » dans la barre de gauche
-  (il passe en bleu quand une nouvelle version a été téléchargée). L'application
-  redémarre toute seule en une dizaine de secondes.
+- **Mises à jour** : l'application vérifie toute seule (à l'ouverture, puis toutes les
+  6 heures) si une nouvelle version est sortie. Si oui, un message apparaît et le bouton
+  « ⬆️ Installer la mise à jour » s'affiche dans la barre de gauche. Un clic suffit :
+  la nouvelle version est installée sur le PC et sur ta copie GitHub, sans toucher à
+  tes offres ni à tes réglages, et l'application redémarre en une vingtaine de secondes.
 - **Arrêter le serveur de l'application** : `windows\stop_app.ps1`.
 - **Tout désinstaller** : `powershell -ExecutionPolicy Bypass -File windows\uninstall.ps1`
