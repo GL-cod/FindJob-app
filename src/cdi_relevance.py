@@ -3,7 +3,7 @@ import json
 import logging
 import re
 
-from . import candidat
+from . import candidat, temps_travail
 from .gemini_handler import AllModelsExhausted
 
 log = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ def offer_text(offer):
     return "\n".join(parts)
 
 
-def relevance_prompt(offer, profile, max_years=3, excluded_domains=(), feedback_block=""):
+def relevance_prompt(offer, profile, max_years=3, excluded_domains=(), feedback_block="", work_time=None):
     metiers = candidat.metiers()
     cvs = candidat.cvs()
     cv_choices = "|".join(f'"{k}"' for k in cvs)
@@ -53,7 +53,7 @@ def relevance_prompt(offer, profile, max_years=3, excluded_domains=(), feedback_
         "stage ou alternance, "
         + (f"métier sans lien avec {metiers}, " if metiers else "métier sans lien avec le profil, ")
         + "ou compétence obligatoire qu'il n'a pas du tout.\n"
-        + domains + feedback_block + cv_block +
+        + temps_travail.prompt_rule(work_time) + domains + feedback_block + cv_block +
         "Donne enfin une note d'adéquation sur 10 : 9-10 = correspond très bien et chances réelles, "
         "7-8 = bonne piste, 5-6 = possible mais pas idéal, 0-4 = à écarter (alors relevant = false).\n"
         "Réponds UNIQUEMENT avec un objet JSON sur une ligne, sans texte autour :\n"
@@ -145,7 +145,7 @@ def parse_verdict(answer):
 
 
 def check_offers(offers, profile, handler, max_checks, save_func=None, draft_letters=True, max_years=3,
-                 excluded_domains=(), feedback_block=""):
+                 excluded_domains=(), feedback_block="", work_time=None):
     """Judge unchecked offers in place. Returns {id: offer} of newly relevant ones."""
     relevant = {}
     checked = 0
@@ -163,8 +163,16 @@ def check_offers(offers, profile, handler, max_checks, save_func=None, draft_let
             log.info(f"Skipped {offer_id} without Gemini: {stated} years of experience required.")
             continue
 
+        wrong_time = temps_travail.mismatch(offer, work_time)
+        if wrong_time:
+            offer["relevancy_check"] = "not_relevant"
+            offer["reason"] = wrong_time
+            log.info(f"Skipped {offer_id} without Gemini: {wrong_time}.")
+            continue
+
         try:
-            answer = handler.generate(relevance_prompt(offer, profile, max_years, excluded_domains, feedback_block))
+            answer = handler.generate(relevance_prompt(offer, profile, max_years, excluded_domains, feedback_block,
+                                                       work_time))
             is_rel, cv, reason, years = parse_verdict(answer)
             score = parse_score(answer)
         except AllModelsExhausted:

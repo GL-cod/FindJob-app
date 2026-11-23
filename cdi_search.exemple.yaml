@@ -21,6 +21,13 @@ max_days: 21
 # (3 -> "3 ans" accepté, "4 ans", "5 ans minimum", "3 à 5 ans"... selon le minimum).
 max_experience_years: 3
 
+# Temps de travail recherché : plein, partiel ou tous.
+# LinkedIn et France Travail filtrent directement. Pour HelloWork et l'APEC, les offres
+# qui affichent l'autre temps de travail sont écartées, et Gemini trie le reste.
+# Pour un job à temps partiel, pense aussi à vider les champs contrat/contracts plus bas
+# (beaucoup de temps partiels sont en CDD) et à adapter ton profil.
+temps_de_travail: plein
+
 # Mots qui, présents dans l'intitulé, font écarter l'offre sans appeler Gemini.
 excluded_title_words:
   - stage
@@ -75,7 +82,7 @@ francetravail:
   # FT_CLIENT_ID et FT_CLIENT_SECRET ; sans eux, la source est simplement ignorée.
   enabled: true
   region: "11"            # Île-de-France (ou departements: [75, 91, 92] pour viser plus fin)
-  contrat: CDI
+  contrat: CDI            # vide = tous contrats
   max_results_per_keyword: 150   # maximum autorisé par l'API
 
 apec:
@@ -83,7 +90,7 @@ apec:
   # sur ton PC avec LinkedIn (CDI_SOURCES=linkedin,apec).
   enabled: false
   lieu: "711"             # Île-de-France
-  contrat: "101888"       # CDI
+  contrat: "101888"       # CDI ; vide = tous contrats
   pages_per_keyword: 1    # 20 offres par page
   max_details_per_run: 80
 
@@ -93,7 +100,7 @@ linkedin:
   enabled: false
   geo_id: 104246759       # Île-de-France
   posted_within: r259200  # 72 h (couvre le week-end) ; r86400 = 24 h, r604800 = 7 jours
-  job_types: F            # F = temps plein ; vide = tous
+  job_types: F            # ignoré si temps_de_travail est réglé (plus haut)
   experience_levels: ""   # ex. "1,2,3" (stage, premier emploi, associé) ; vide = tous
   pages_per_keyword: 1    # 10 offres par page
   # Pages de détail lues par passage (c'est là que LinkedIn limite). Le reste

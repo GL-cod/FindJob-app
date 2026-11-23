@@ -366,7 +366,7 @@ def check_for_updates(state, signature, pull, clear, now=None):
 
 def score_offer(offer, handler, profile, description=None):
     """Score an offer already in the app (offers found before scores existed). Returns (score, reason)."""
-    from . import feedback
+    from . import feedback, temps_travail
     from .cdi_relevance import parse_score, parse_verdict, relevance_prompt
     if description is None:
         description = offer.get("description") or ""
@@ -376,7 +376,8 @@ def score_offer(offer, handler, profile, description=None):
             except Exception:
                 description = ""
     answer = handler.generate(relevance_prompt({**offer, "description": description}, profile,
-                                               feedback_block=feedback.prompt_block(lang="fr")))
+                                               feedback_block=feedback.prompt_block(lang="fr"),
+                                               work_time=temps_travail.from_file()))
     return parse_score(answer), parse_verdict(answer)[2]
 
 

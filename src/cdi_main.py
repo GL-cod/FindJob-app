@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 import requests
 import yaml
 
-from . import dedupe, feedback
+from . import dedupe, feedback, temps_travail
 from .cdi_relevance import check_offers, cv_text
 from .gemini_handler import GeminiHandler
 from .metrics import ErrorCounter
@@ -59,6 +59,7 @@ def load_settings(path=SETTINGS_PATH):
         settings = yaml.safe_load(f)
     if not settings.get("keywords"):
         raise ValueError("cdi_search.yaml: 'keywords' must list at least one keyword.")
+    temps_travail.value(settings)   # clear error on a typo (plein / partiel / tous)
     return settings
 
 
@@ -290,6 +291,7 @@ def run():
         max_years=settings.get("max_experience_years", 3),
         excluded_domains=settings.get("excluded_domains") or [],
         feedback_block=feedback.prompt_block(lang="fr"),
+        work_time=temps_travail.value(settings),
     )
     log.info(f"{len(relevant)} relevant offer(s).")
 

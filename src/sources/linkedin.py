@@ -15,6 +15,8 @@ import logging
 
 from bs4 import BeautifulSoup
 
+from .. import temps_travail
+
 from .common import (
     SourceBlocked, clean_text, get_html, get_html_patient, html_to_text, make_offer, parse_iso_date,
     polite_sleep, title_is_excluded,
@@ -87,8 +89,9 @@ def scrape(session, settings, stored, since, today=None):
                 "f_TPR": li.get("posted_within", "r86400"),
                 "start": page * PAGE_SIZE,
             }
-            if li.get("job_types"):
-                params["f_JT"] = li["job_types"]
+            job_types = temps_travail.linkedin_job_types(settings)
+            if job_types:
+                params["f_JT"] = job_types
             if li.get("experience_levels"):
                 params["f_E"] = li["experience_levels"]
 

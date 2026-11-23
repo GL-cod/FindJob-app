@@ -15,6 +15,7 @@ import os
 import re
 import time
 
+from .. import temps_travail
 from .common import SourceBlocked, make_offer, parse_iso_date, title_is_excluded
 
 log = logging.getLogger(__name__)
@@ -62,14 +63,18 @@ def published_since(max_days):
     return next((d for d in PUBLISHED_SINCE if d >= max_days), PUBLISHED_SINCE[-1])
 
 
-def search(session, token, keyword, cfg, max_days):
+def search(session, token, keyword, cfg, max_days, temps_plein=None):
     params = {
         "motsCles": keyword_param(keyword),
-        "typeContrat": cfg.get("contrat", "CDI"),
         "publieeDepuis": published_since(cfg.get("published_within_days", max_days)),
         "sort": 1,                                   # newest first
         "range": f"0-{cfg.get('max_results_per_keyword', 150) - 1}",
     }
+    contrat = cfg.get("contrat", "CDI")
+    if contrat:                                      # empty = every contract type
+        params["typeContrat"] = contrat
+    if temps_plein:                                  # "true" = full time, "false" = part time
+        params["tempsPlein"] = temps_plein
     if cfg.get("departements"):
         params["departement"] = ",".join(str(d) for d in cfg["departements"])
     else:
@@ -84,6 +89,10 @@ def search(session, token, keyword, cfg, max_days):
             return []
         if r.status_code in (401, 403):
             raise SourceBlocked(f"HTTP {r.status_code} on France Travail search")
+        if r.status_code == 400 and "tempsPlein" in params:
+            log.warning("France Travail: tempsPlein filter refused, retrying without it (Gemini sorts instead).")
+            params.pop("tempsPlein")
+            continue
         if r.status_code == 400:
             log.warning(f"France Travail: keyword '{keyword}' rejected ({r.text[:150]}), skipped.")
             return []
@@ -96,6 +105,7 @@ def offer_description(o):
     parts = [o.get("description") or ""]
     extra = [
         ("Expérience", o.get("experienceLibelle")),
+        ("Temps de travail", o.get("dureeTravailLibelle")),
         ("Salaire", (o.get("salaire") or {}).get("libelle")),
         ("Qualification", o.get("qualificationLibelle")),
         ("Secteur", o.get("secteurActiviteLibelle")),
@@ -109,13 +119,20 @@ def offer_description(o):
     return "\n\n".join(p for p in parts + ["\n".join(lines)] if p).strip()
 
 
+def contract_label(o):
+    """« Contrat à durée indéterminée · Temps partiel » (working time when the offer gives it)."""
+    contract = o.get("typeContratLibelle") or o.get("typeContrat") or ""
+    temps = o.get("dureeTravailLibelleConverti") or ""
+    return " · ".join(x for x in (contract, temps) if x)
+
+
 def to_offer(o):
     loc = (o.get("lieuTravail") or {}).get("libelle") or ""
     loc = re.sub(r"^\d{2,3}\s*-\s*", "", loc)       # « 75 - Paris 15e » -> « Paris 15e »
     return make_offer(
         "France Travail", o.get("intitule") or "", (o.get("entreprise") or {}).get("nom") or "", loc,
         PUBLIC_URL.format(id=o["id"]), parse_iso_date(o.get("dateCreation") or ""),
-        contract=o.get("typeContratLibelle") or o.get("typeContrat") or "CDI",
+        contract=contract_label(o),
         description=offer_description(o))
 
 
@@ -129,7 +146,8 @@ def scrape(session, settings, stored, since, today=None):
         return {}
     found = {}
     for keyword in settings["keywords"]:
-        results = search(session, token, keyword, cfg, settings.get("max_days", 21))
+        results = search(session, token, keyword, cfg, settings.get("max_days", 21),
+                         temps_plein=temps_travail.francetravail_param(settings))
         kept = 0
         for o in results:
             if not o.get("id"):

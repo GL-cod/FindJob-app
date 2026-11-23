@@ -4,7 +4,7 @@
 
 ## Ce que fait l'application
 
-- Elle cherche toute seule des offres de CDI sur HelloWork (depuis GitHub), sur LinkedIn et sur l'APEC (depuis ton PC), et en option des offres de VIE.
+- Elle cherche toute seule des offres d'emploi (CDI par défaut, temps plein ou partiel au choix) sur HelloWork et France Travail (depuis GitHub), sur LinkedIn et sur l'APEC (depuis ton PC), et en option des offres de VIE.
 - Gemini, l'IA gratuite de Google, lit chaque offre et la compare à ton profil. Il donne une note sur 10, conseille le CV à envoyer et écarte ce qui ne te correspond pas.
 - Une application sur ton PC regroupe tout : ouvrir l'offre, « J'ai postulé », « Pas intéressé » (l'application apprend de tes refus), lettre de motivation en Word, CV adapté à l'offre à partir de tes CV PowerPoint, préparation d'entretien, statistiques.
 - En option, elle se relie à un Google Sheets de suivi de tes candidatures et à un onglet Réseau pour tes prises de contact.
@@ -75,7 +75,10 @@ Toujours sur GitHub, ouvre le fichier **`cdi_search.yaml`** de ta copie et cliqu
 - **`candidat` → `cvs`** : tes CV. Si tu n'en as qu'un, laisse `principal`. Si tu en as deux ou plus (par exemple un CV technique et un CV gestion de projet), décris chacun. L'application te dira lequel envoyer pour chaque offre.
 - **`excluded_title_words`** et **`excluded_domains`** : ce que tu ne veux surtout pas voir.
 - **`max_experience_years`** : les offres qui demandent plus d'années d'expérience que ce chiffre sont écartées (3 par défaut).
+- **`temps_de_travail`** : `plein`, `partiel` ou `tous`. LinkedIn et France Travail filtrent directement ; pour les autres sites, les offres qui affichent l'autre temps de travail sont écartées et Gemini trie le reste.
 - **`candidat` → `reseau`** : les mots-clés utilisés pour chercher des contacts sur LinkedIn dans l'onglet Réseau.
+
+**Tu cherches un job à temps partiel ?** Mets `temps_de_travail: partiel`, puis vide les types de contrat pour ne pas te limiter au CDI (beaucoup de temps partiels sont en CDD) : `hellowork` → `contracts: ""`, `francetravail` → `contrat: ""`, `apec` → `contrat: ""`. Écris aussi dans ton profil (étape 2) que tu cherches un temps partiel et pourquoi (études, autre activité…) : les lettres de motivation en tiendront compte.
 
 **Ta région.** Le fichier est réglé sur l'**Île-de-France**. Si tu cherches ailleurs :
 

@@ -23,7 +23,7 @@ from src import reloader  # noqa: E402
 
 reloader.reload_if_changed(ROOT / "src")  # code updated by a git pull while the app runs -> fresh modules
 
-from src import candidat, cdi_main, feedback, gitsync, reseau, reseau_ui, sheets, stats, tracking  # noqa: E402
+from src import candidat, cdi_main, feedback, gitsync, reseau, reseau_ui, sheets, stats, temps_travail, tracking  # noqa: E402
 try:
     from src import letter_docx  # needs python-docx (requirements-app.txt)
 except ImportError:
@@ -1337,6 +1337,8 @@ with tab_reglages:
         st.write(", ".join(settings.get("keywords", [])))
         st.markdown(f"**Expérience maximale exigée :** {settings.get('max_experience_years', 3)} ans")
         st.markdown(f"**Ancienneté max des offres :** {settings.get('max_days', 21)} jours")
+        _tt = temps_travail.value(settings)
+        st.markdown(f"**Temps de travail :** {temps_travail.LABELS[_tt] if _tt else 'non précisé (réglage temps_de_travail)'}")
     with r2:
         st.markdown("**Mots exclus dans l'intitulé**")
         st.write(", ".join(settings.get("excluded_title_words", [])))

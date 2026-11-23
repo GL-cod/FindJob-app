@@ -9,7 +9,7 @@ from pathlib import Path
 
 # dependencies before the modules that use them
 ORDER = [
-    "src.lang", "src.metrics", "src.store", "src.telegram", "src.gemini_handler", "src.feedback",
+    "src.lang", "src.metrics", "src.store", "src.telegram", "src.gemini_handler", "src.feedback", "src.temps_travail",
     "src.sources.common", "src.sources.hellowork", "src.sources.linkedin", "src.sources.apec", "src.sources.francetravail", "src.sources",
     "src.dedupe", "src.relevance", "src.cdi_relevance", "src.sheets", "src.stats", "src.gitsync",
     "src.tracking", "src.cdi_main", "src.reseau", "src.reseau_ui",
