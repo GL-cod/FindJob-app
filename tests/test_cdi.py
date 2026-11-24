@@ -327,7 +327,7 @@ def test_patient_get_retries_once(monkeypatch):
 
 
 
-def test_scores_and_low_score_rejected():
+def test_scores_kept_even_when_low():
     from src.cdi_relevance import check_offers, parse_score
 
     class H:
@@ -341,8 +341,8 @@ def test_scores_and_low_score_rejected():
     offers = {"a": {"title": "Bon poste", "source": "X", "description": "", "relevancy_check": "unchecked"},
               "b": {"title": "Poste moyen", "source": "X", "description": "", "relevancy_check": "unchecked"}}
     rel = check_offers(offers, "profil", H(), max_checks=10)
-    assert set(rel) == {"a"} and offers["a"]["score"] == 8
-    assert offers["b"]["score"] == 4 and offers["b"]["relevancy_check"] == "not_relevant"
+    assert set(rel) == {"a", "b"} and offers["a"]["score"] == 8
+    assert offers["b"]["score"] == 4 and offers["b"]["relevancy_check"] == "relevant"
     assert parse_score('{"score": "7,6"}') == 8 and parse_score("YES") is None
 
 

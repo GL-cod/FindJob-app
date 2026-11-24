@@ -51,11 +51,10 @@ def relevance_prompt(offer, profile, max_years=3, excluded_domains=(), feedback_
         "\"débutant accepté\" ou rien de précisé -> 0.\n"
         f"Réponds NON si : expérience minimale exigée supérieure à {max_years} ans, "
         "stage ou alternance, "
-        + (f"métier sans lien avec {metiers}, " if metiers else "métier sans lien avec le profil, ")
-        + "ou compétence obligatoire qu'il n'a pas du tout.\n"
+        + (f"ou métier sans lien avec {metiers}.\n" if metiers else "ou métier sans lien avec le profil.\n")
         + temps_travail.prompt_rule(work_time) + domains + feedback_block + cv_block +
         "Donne enfin une note d'adéquation sur 10 : 9-10 = correspond très bien et chances réelles, "
-        "7-8 = bonne piste, 5-6 = possible mais pas idéal, 0-4 = à écarter (alors relevant = false).\n"
+        "7-8 = bonne piste, 5-6 = possible mais pas idéal, 0-4 = faible correspondance.\n"
         "Réponds UNIQUEMENT avec un objet JSON sur une ligne, sans texte autour :\n"
         '{"relevant": true|false, "score": <0-10>, "years_required": <entier>, "cv": ' + cv_choices + ', '
         '"reason": "<une phrase courte en français qui justifie la note>"}\n\n'
@@ -186,8 +185,6 @@ def check_offers(offers, profile, handler, max_checks, save_func=None, draft_let
         if years > max_years:
             is_rel = False
             reason = f"{years} ans d'expérience exigés"
-        if score is not None and score < 5:
-            is_rel = False
         offer["score"] = score
         offer["relevancy_check"] = "relevant" if is_rel else "not_relevant"
         offer["reason"] = reason
