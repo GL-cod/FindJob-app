@@ -61,9 +61,9 @@ Ensuite, dans l'application :
 Une offre dont le lien est déjà dans ton Sheets est marquée
 « 📗 déjà dans ton Sheets », pour éviter de postuler deux fois.
 
-## France Travail (facultatif mais conseillé)
+## France Travail (facultatif, désactivé par défaut)
 
-France Travail a une API officielle et gratuite. Pour l'activer :
+France Travail a une API officielle et gratuite. Pour l'activer, mets `enabled: true` dans la partie `francetravail` de `cdi_search.yaml`, puis :
 
 1. crée un compte sur https://francetravail.io, puis « Mes applications » > « Créer une application » ;
 2. abonne l'application à **API Offres d'emploi** ;
@@ -73,7 +73,7 @@ France Travail a une API officielle et gratuite. Pour l'activer :
    préparations d'entretien des offres France Travail :
    `FT_CLIENT_ID=...` et `FT_CLIENT_SECRET=...`
 
-Sans ces clés, la recherche France Travail est simplement ignorée.
+Sans `enabled: true` et ces clés, la recherche France Travail est simplement ignorée.
 
 ## Réseau (onglet 🤝 Réseau)
 

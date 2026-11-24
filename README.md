@@ -4,7 +4,7 @@
 
 ## Ce que fait l'application
 
-- Elle cherche toute seule des offres d'emploi (CDI par défaut, temps plein ou partiel au choix) sur HelloWork et France Travail (depuis GitHub), sur LinkedIn et sur l'APEC (depuis ton PC), et en option des offres de VIE.
+- Elle cherche toute seule des offres d'emploi (CDI par défaut, temps plein ou partiel au choix) sur HelloWork (depuis GitHub, avec France Travail en option), sur LinkedIn et sur l'APEC (depuis ton PC), et en option des offres de VIE.
 - Gemini, l'IA gratuite de Google, lit chaque offre et la compare à ton profil. Il donne une note sur 10, conseille le CV à envoyer et écarte ce qui ne te correspond pas.
 - Une application sur ton PC regroupe tout : ouvrir l'offre, « J'ai postulé », « Pas intéressé » (l'application apprend de tes refus), lettre de motivation en Word, CV adapté à l'offre à partir de tes CV PowerPoint, préparation d'entretien, statistiques.
 - En option, elle se relie à un Google Sheets de suivi de tes candidatures et à un onglet Réseau pour tes prises de contact.
