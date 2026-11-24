@@ -80,7 +80,7 @@ hellowork:
 francetravail:
   # API officielle et gratuite (https://francetravail.io). Il faut les secrets GitHub
   # FT_CLIENT_ID et FT_CLIENT_SECRET ; sans eux, la source est simplement ignorée.
-  enabled: true
+  enabled: false          # true pour l'activer (avec les deux secrets ci-dessus)
   region: "11"            # Île-de-France (ou departements: [75, 91, 92] pour viser plus fin)
   contrat: CDI            # vide = tous contrats
   max_results_per_keyword: 150   # maximum autorisé par l'API
