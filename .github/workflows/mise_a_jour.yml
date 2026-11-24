@@ -3,7 +3,7 @@ name: Mettre à jour depuis l'original
 # Pour une copie (fork) du dépôt : récupère la dernière version du CODE du dépôt d'origine,
 # sans toucher à tes données (offres, refus, statistiques) ni à tes réglages (cdi_search.yaml).
 # Actions > Mettre à jour depuis l'original > Run workflow. Ensuite, sur le PC, bouton
-# « ⬆️ Mettre à jour l'application ».
+# « 🔄 Redémarrer pour l'appliquer » (ou rouvrir l'application).
 # Les fichiers du dossier .github/workflows ne peuvent pas être mis à jour ainsi (GitHub
 # l'interdit) : ils changent rarement, le résumé du passage indique s'il y a du nouveau.
 
@@ -64,4 +64,4 @@ jobs:
           if ! git diff --quiet HEAD FETCH_HEAD -- .github/workflows; then
             echo "::warning::Les workflows de l'original ont changé (.github/workflows). Copie-les à la main depuis https://github.com/GL-cod/FindJob-app/tree/main/.github/workflows si besoin."
           fi
-          echo "Terminé. Sur le PC : bouton « ⬆️ Mettre à jour l'application »."
+          echo "Terminé. Sur le PC : bouton « 🔄 Redémarrer pour l'appliquer » (ou rouvre l'application)."
