@@ -93,7 +93,9 @@ def scrape(session, settings, stored, since, today=None):
 
     for keyword in settings["keywords"]:
         for page in range(1, hw.get("pages_per_keyword", 1) + 1):
-            params = {"k": keyword, "l": hw["location"], "p": page}
+            params = {"k": keyword, "p": page}
+            if hw.get("location"):                   # vide = toute la France
+                params["l"] = hw["location"]
             if hw.get("contracts"):
                 params["c"] = hw["contracts"]
 

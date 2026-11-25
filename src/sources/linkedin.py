@@ -28,6 +28,7 @@ SEARCH_URL = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/se
 DETAIL_URL = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{id}"
 VIEW_URL = "https://www.linkedin.com/jobs/view/{id}"
 PREFIX = "li_"
+FRANCE_GEO_ID = 105015875  # toute la France
 PAGE_SIZE = 10  # the guest search returns 10 cards per call
 
 
@@ -85,7 +86,7 @@ def scrape(session, settings, stored, since, today=None):
         for page in range(li.get("pages_per_keyword", 1)):
             params = {
                 "keywords": keyword,
-                "geoId": li["geo_id"],
+                "geoId": li.get("geo_id") or FRANCE_GEO_ID,
                 "f_TPR": li.get("posted_within", "r86400"),
                 "start": page * PAGE_SIZE,
             }

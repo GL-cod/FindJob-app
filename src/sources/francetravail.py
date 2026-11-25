@@ -77,8 +77,8 @@ def search(session, token, keyword, cfg, max_days, temps_plein=None):
         params["tempsPlein"] = temps_plein
     if cfg.get("departements"):
         params["departement"] = ",".join(str(d) for d in cfg["departements"])
-    else:
-        params["region"] = cfg.get("region", "11")   # 11 = Île-de-France
+    elif cfg.get("region", "11"):                    # 11 = Île-de-France ; vide = toute la France
+        params["region"] = cfg.get("region", "11")
     for attempt in range(3):
         r = session.get(SEARCH_URL, params=params, timeout=30,
                         headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})

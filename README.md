@@ -86,6 +86,8 @@ Toujours sur GitHub, ouvre le fichier **`cdi_search.yaml`** de ta copie et cliqu
 - `linkedin` → `geo_id` : fais une recherche d'emploi sur LinkedIn dans ta région. L'adresse de la page contient `geoId=` suivi d'un nombre : c'est ce nombre.
 - `apec` → `lieu` : fais une recherche sur apec.fr en choisissant ta région, puis recopie le code de lieu qui apparaît dans l'adresse de la page.
 
+**Toute la France :** mets `location: ""` (HelloWork), `geo_id: 105015875` (LinkedIn) et `lieu: ""` (APEC).
+
 Ne mets **ni téléphone ni e-mail** dans ce fichier, il est public. Ton nom, tu le mettras sur le PC à l'étape 6.
 
 Clique ensuite sur **Commit changes…**, puis encore sur **Commit changes**.

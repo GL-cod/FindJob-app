@@ -352,3 +352,29 @@ def test_telegram_off_by_default(monkeypatch):
     assert telegram.enabled() is False
     monkeypatch.setenv("TELEGRAM_ENABLED", "true")
     assert telegram.enabled() is True
+
+
+def test_toute_la_france(monkeypatch):
+    """Lieu vide = pas de filtre de lieu (HelloWork) / geoId France (LinkedIn)."""
+    seen = []
+
+    def fake_get(session, url, params=None):
+        seen.append((url, dict(params or {})))
+        return None
+
+    for mod in (hellowork, linkedin):
+        monkeypatch.setattr(mod, "get_html", fake_get)
+        monkeypatch.setattr(mod, "get_html_patient", fake_get)
+        monkeypatch.setattr(mod, "polite_sleep", lambda *a, **k: None)
+
+    hellowork.scrape(None, {"keywords": ["informatique"], "hellowork": {"location": "", "contracts": "CDI"}},
+                     set(), date(2026, 11, 1), today=TODAY)
+    linkedin.scrape(None, {"keywords": ["informatique"], "linkedin": {}}, set(), date(2026, 11, 1), today=TODAY)
+    hw = next(p for u, p in seen if u == hellowork.SEARCH_URL)
+    li = next(p for u, p in seen if u == linkedin.SEARCH_URL)
+    assert "l" not in hw and hw["k"] == "informatique" and hw["c"] == "CDI"
+    assert li["geoId"] == linkedin.FRANCE_GEO_ID
+
+    seen.clear()
+    hellowork.scrape(None, {"keywords": ["x"], "hellowork": {"location": "Lyon"}}, set(), date(2026, 11, 1))
+    assert seen[0][1]["l"] == "Lyon"
