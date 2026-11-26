@@ -132,6 +132,13 @@ def scrape(session, settings, stored, since, today=None):
                 break            # sorted by date: the next pages only hold offers already seen
 
     offers = {}
+    if hw.get("pages_offre", "au_jugement") == "au_jugement":
+        # Description read later, only for the offers Gemini is about to judge (fill_details):
+        # opening every new offer took most of the run (2 000 pages on 26/11).
+        for key, c in found.items():
+            offers[key] = make_offer("HelloWork", c["title"], c["company"], c["location"],
+                                     OFFER_URL.format(id=c["id"]), c["posted"], contract=c["contract"])
+        return offers
     for n, (key, c) in enumerate(found.items()):
         url = OFFER_URL.format(id=c["id"])
         description, posted, extra = "", c["posted"], {}
@@ -160,3 +167,20 @@ def scrape(session, settings, stored, since, today=None):
         offers[key] = offer
 
     return offers
+
+
+def fill_details(session, offer):
+    """Description (+ exact date, experience) of a stored offer, read just before judging it.
+
+    True = done, False = offer no longer on the site."""
+    html = get_html_patient(session, offer["url"])
+    polite_sleep(0.5, 1.5)
+    if not html:
+        return False
+    description, json_date, extra = parse_offer_page(html)
+    if extra.get("experience"):
+        description += f"\n\nExpérience demandée : {extra['experience']}"
+    offer["description"] = description or "(pas de description)"
+    if json_date:
+        offer["posted"] = json_date.isoformat()
+    return True

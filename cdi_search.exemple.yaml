@@ -68,13 +68,17 @@ excluded_domains:
   - vente / commercial pur (prospection, objectifs de chiffre d'affaires)
   - centre d'appels, télévente
 
+# Offres envoyées ensemble à Gemini (une seule demande pour 10 offres : bien plus d'offres jugées
+# par passage). 1 = une par une.
+taille_lot: 10
+
 # Lieux jugés en premier par Gemini (départements ou noms) : quand il y a plus d'offres que
 # max_checks_per_run, celles-ci passent d'abord, puis les plus récentes ; les autres attendent.
 priorite_lieux: [Île-de-France, 75, 77, 78, 91, 92, 93, 94, 95]
 
 # Nombre max d'offres jugées par Gemini à chaque exécution (le reste attend
 # l'exécution suivante). Protège le quota gratuit partagé avec le VIE Watcher.
-max_checks_per_run: 120
+max_checks_per_run: 300
 
 # Heures (Europe/Paris, jours ouvrés) où le CDI Watcher tourne sur GitHub (HelloWork).
 # Le planning GitHub (.github/workflows/cdi_watch.yml) le déclenche vers 12h et 19h.
@@ -86,6 +90,7 @@ hellowork:
   contracts: CDI          # utilisé seulement si « contrats » (plus haut) est absent
   tri: date               # date = les plus récentes d'abord (pages lues jusqu'aux offres déjà vues) ; pertinence sinon
   pages_per_keyword: 3    # au plus, 30 offres par page
+  pages_offre: au_jugement  # description lue seulement quand l'offre va être jugée (sinon : a_la_recherche)
 
 adecco:
   # Agence d'intérim (intérim, CDD, CDI). Lit le plan du site public des offres d'Adecco

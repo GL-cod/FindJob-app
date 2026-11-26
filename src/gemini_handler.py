@@ -79,7 +79,7 @@ class GeminiHandler:
                 "x-goog-api-key": self.api_key,
             },
             json={"contents": [{"parts": [{"text": prompt}]}]},
-            timeout=30,
+            timeout=90,     # a batch of 10 offers takes longer than one
         )
         r.raise_for_status()
         return answer_text(r.json())

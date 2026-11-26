@@ -233,6 +233,37 @@ def append_metrics(record, path=None):
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+def describer(session):
+    """describe(offer) for check_offers: downloads the description of an offer about to be judged.
+
+    True = done, False = removed from the site, None = not possible now (site blocking, error)."""
+    blocked = set()
+
+    def describe(offer):
+        source = offer.get("source")
+        if source in blocked:
+            return None
+        try:
+            if source == "HelloWork":
+                return hellowork.fill_details(session, offer)
+            if source in ("Adecco", "CRIT"):
+                module = adecco if source == "Adecco" else crit
+                text = module.fetch_description(session, offer["url"])
+                if not text:
+                    return False
+                offer["description"] = text
+                return True
+        except SourceBlocked as e:
+            log.warning(f"{source}: blocked while reading descriptions ({e}); its offers wait for the next run.")
+            blocked.add(source)
+            return None
+        except Exception as e:
+            log.warning(f"Description failed for {offer.get('url')}: {e}")
+            return None
+        return True                     # other sites: judged with what is known
+    return describe
+
+
 def run():
     t0 = time.time()
     setup_logging()
@@ -287,6 +318,7 @@ def run():
     merged = {**stored, **scraped}
 
     # ---------------- Relevance (+ letters)
+    describe = describer(session)
     handler = GeminiHandler(env["GEMINI_API_KEY"], [{"name": m} for m in settings["gemini_models"]])
     relevant = check_offers(
         merged, env["USER_PROFILE"], handler,
@@ -298,6 +330,8 @@ def run():
         feedback_block=feedback.prompt_block(lang="fr"),
         work_time=temps_travail.value(settings),
         priority_places=settings.get("priorite_lieux") or [],
+        batch_size=settings.get("taille_lot", 10),
+        describe=describe,
     )
     log.info(f"{len(relevant)} relevant offer(s).")
 

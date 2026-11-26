@@ -29,7 +29,8 @@ def offer_text(offer):
     return "\n".join(parts)
 
 
-def relevance_prompt(offer, profile, max_years=3, excluded_domains=(), feedback_block="", work_time=None):
+def _rules(max_years, excluded_domains, feedback_block, work_time):
+    """Sorting rules shared by the one-offer and the batch prompts: (rules text, cv choices)."""
     metiers = candidat.metiers()
     cvs = candidat.cvs()
     cv_choices = "|".join(f'"{k}"' for k in cvs)
@@ -55,12 +56,58 @@ def relevance_prompt(offer, profile, max_years=3, excluded_domains=(), feedback_
         + temps_travail.prompt_rule(work_time) + domains + feedback_block + cv_block +
         "Donne enfin une note d'adéquation sur 10 : 9-10 = correspond très bien et chances réelles, "
         "7-8 = bonne piste, 5-6 = possible mais pas idéal, 0-4 = faible correspondance.\n"
+    ), cv_choices
+
+
+def relevance_prompt(offer, profile, max_years=3, excluded_domains=(), feedback_block="", work_time=None):
+    rules, cv_choices = _rules(max_years, excluded_domains, feedback_block, work_time)
+    return (
+        rules +
         "Réponds UNIQUEMENT avec un objet JSON sur une ligne, sans texte autour :\n"
         '{"relevant": true|false, "score": <0-10>, "years_required": <entier>, "cv": ' + cv_choices + ', '
         '"reason": "<une phrase courte en français qui justifie la note>"}\n\n'
         "=== PROFIL DU CANDIDAT ===\n" + profile + "\n\n"
         "=== OFFRE ===\n" + offer_text(offer)
     )
+
+
+BATCH_DESC_CHARS = 3500     # per offer in a batch (the whole prompt stays reasonable)
+
+
+def batch_relevance_prompt(offers, profile, max_years=3, excluded_domains=(), feedback_block="", work_time=None):
+    """One prompt for several offers ([(label, offer)]): Gemini judges each one on its own."""
+    rules, cv_choices = _rules(max_years, excluded_domains, feedback_block, work_time)
+    blocks = []
+    for label, offer in offers:
+        text = offer_text({**offer, "description": (offer.get("description") or "")[:BATCH_DESC_CHARS]})
+        blocks.append(f"=== OFFRE {label} ===\n{text}")
+    return (
+        f"Il y a {len(offers)} offres à juger, chacune séparément et avec les mêmes règles.\n" + rules +
+        "Réponds UNIQUEMENT avec un tableau JSON, un objet par offre, dans l'ordre, sans texte autour :\n"
+        '[{"offre": "<identifiant, ex. ' + offers[0][0] + '>", "relevant": true|false, "score": <0-10>, '
+        '"years_required": <entier>, "cv": ' + cv_choices + ', '
+        '"reason": "<une phrase courte en français qui justifie la note>"}, ...]\n\n'
+        "=== PROFIL DU CANDIDAT ===\n" + profile + "\n\n" + "\n\n".join(blocks)
+    )
+
+
+def parse_batch(answer):
+    """{label: (relevant, cv, reason, years, score)} from a batch answer (missing offers left out)."""
+    text = (answer or "").strip()
+    m = re.search(r"\[.*\]", text, re.DOTALL)
+    if not m:
+        return {}
+    try:
+        items = json.loads(m.group(0))
+    except json.JSONDecodeError:
+        return {}
+    out = {}
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict) or not item.get("offre"):
+            continue
+        one = json.dumps(item, ensure_ascii=False)
+        out[str(item["offre"]).strip()] = (*parse_verdict(one), parse_score(one))
+    return out
 
 
 def letter_prompt(offer, profile, cv_key):
@@ -192,16 +239,107 @@ def judging_order(offers, places=()):
 
 
 def check_offers(offers, profile, handler, max_checks, save_func=None, draft_letters=True, max_years=3,
-                 excluded_domains=(), feedback_block="", work_time=None, priority_places=()):
-    """Judge unchecked offers in place, priority places and newest first. Returns {id: offer} of
-    newly relevant ones."""
+                 excluded_domains=(), feedback_block="", work_time=None, priority_places=(), batch_size=10,
+                 describe=None):
+    """Judge unchecked offers in place, priority places first and the sites in turn.
+
+    Offers go to Gemini by batches of `batch_size` (one request for several offers: many more
+    offers judged per run); an offer missing from a batch answer is judged alone. `describe(offer)`
+    downloads a missing description just before judging (True = done, False = offer removed from
+    the site, None = not possible now: the offer waits). Returns {id: offer} of newly relevant ones."""
     relevant = {}
     checked = 0
-    for offer_id in judging_order(offers, priority_places):
+    rule_args = (max_years, excluded_domains, feedback_block, work_time)
+    batch = []
+    stop = False
+
+    def record(offer_id, verdict):
+        nonlocal checked
+        is_rel, cv, reason, years, score = verdict
         offer = offers[offer_id]
-        if checked >= max_checks:
-            log.info(f"Reached max_checks_per_run ({max_checks}); the rest waits for the next run.")
+        checked += 1
+        if years > max_years:
+            is_rel = False
+            reason = f"{years} ans d'expérience exigés"
+        offer["score"] = score
+        offer["relevancy_check"] = "relevant" if is_rel else "not_relevant"
+        offer["reason"] = reason
+        offer["cv"] = cv
+        log.info(f"Checked {offer_id} [{offer['source']}] {offer['title'][:60]!r}: {offer['relevancy_check']}")
+        if is_rel:
+            if draft_letters:
+                try:
+                    offer["letter"] = handler.generate(letter_prompt(offer, profile, cv)).strip()
+                except AllModelsExhausted:
+                    log.warning("Gemini quota exhausted before the cover letter; sending the offer without it.")
+                    offer["letter"] = ""
+                except Exception as e:
+                    log.warning(f"Cover letter failed for {offer_id}: {e}")
+                    offer["letter"] = ""
+            relevant[offer_id] = offer
+        if save_func is not None and checked % 10 == 0:
+            save_func(offers)
+
+    def judge_alone(offer_id):
+        try:
+            answer = handler.generate(relevance_prompt(offers[offer_id], profile, *rule_args))
+        except AllModelsExhausted:
+            raise
+        except Exception as e:
+            log.error(f"RELEVANCE ERROR - offer {offer_id}: {e}")
+            return
+        record(offer_id, (*parse_verdict(answer), parse_score(answer)))
+
+    def flush():
+        nonlocal stop
+        ids = list(batch)
+        batch.clear()
+        if not ids or stop:
+            return
+        try:
+            if len(ids) == 1:
+                judge_alone(ids[0])
+                return
+            labelled = [(f"O{i + 1}", oid) for i, oid in enumerate(ids)]
+            try:
+                answer = handler.generate(batch_relevance_prompt([(lab, offers[oid]) for lab, oid in labelled],
+                                                                 profile, *rule_args))
+                verdicts = parse_batch(answer)
+            except AllModelsExhausted:
+                raise
+            except Exception as e:
+                log.error(f"RELEVANCE ERROR - batch of {len(ids)} offer(s): {e}; judged one by one.")
+                verdicts = {}
+            missing = [oid for lab, oid in labelled if lab not in verdicts]
+            for lab, oid in labelled:
+                if lab in verdicts:
+                    record(oid, verdicts[lab])
+            if missing and verdicts:
+                log.warning(f"{len(missing)} offer(s) missing from a batch answer: judged one by one.")
+            for oid in missing:
+                judge_alone(oid)
+        except AllModelsExhausted:
+            log.error("RELEVANCE ERROR - all Gemini models exhausted; stopping checks for this run.")
+            stop = True
+
+    for offer_id in judging_order(offers, priority_places):
+        if stop:
             break
+        if checked + len(batch) >= max_checks:
+            flush()
+            if checked >= max_checks or stop:
+                log.info(f"Reached max_checks_per_run ({max_checks}); the rest waits for the next run.")
+                break
+        offer = offers[offer_id]
+
+        if describe is not None and not offer.get("description"):
+            found = describe(offer)
+            if found is None:
+                continue                      # not possible now: waits for the next run
+            if found is False:
+                offer["relevancy_check"] = "not_relevant"
+                offer["reason"] = "Offre retirée du site"
+                continue
 
         stated = required_years(offer.get("description", ""))
         if stated is not None and stated > max_years:
@@ -217,42 +355,10 @@ def check_offers(offers, profile, handler, max_checks, save_func=None, draft_let
             log.info(f"Skipped {offer_id} without Gemini: {wrong_time}.")
             continue
 
-        try:
-            answer = handler.generate(relevance_prompt(offer, profile, max_years, excluded_domains, feedback_block,
-                                                       work_time))
-            is_rel, cv, reason, years = parse_verdict(answer)
-            score = parse_score(answer)
-        except AllModelsExhausted:
-            log.error("RELEVANCE ERROR - all Gemini models exhausted; stopping checks for this run.")
-            break
-        except Exception as e:
-            log.error(f"RELEVANCE ERROR - offer {offer_id}: {e}")
-            continue
-
-        checked += 1
-        if years > max_years:
-            is_rel = False
-            reason = f"{years} ans d'expérience exigés"
-        offer["score"] = score
-        offer["relevancy_check"] = "relevant" if is_rel else "not_relevant"
-        offer["reason"] = reason
-        offer["cv"] = cv
-        log.info(f"Checked {offer_id} [{offer['source']}] {offer['title'][:60]!r}: {offer['relevancy_check']}")
-
-        if is_rel:
-            if draft_letters:
-                try:
-                    offer["letter"] = handler.generate(letter_prompt(offer, profile, cv)).strip()
-                except AllModelsExhausted:
-                    log.warning("Gemini quota exhausted before the cover letter; sending the offer without it.")
-                    offer["letter"] = ""
-                except Exception as e:
-                    log.warning(f"Cover letter failed for {offer_id}: {e}")
-                    offer["letter"] = ""
-            relevant[offer_id] = offer
-
-        if save_func is not None and checked % 10 == 0:
-            save_func(offers)
+        batch.append(offer_id)
+        if len(batch) >= max(1, batch_size):
+            flush()
+    flush()
 
     if save_func is not None:
         save_func(offers)

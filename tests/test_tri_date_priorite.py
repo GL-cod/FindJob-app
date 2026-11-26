@@ -75,7 +75,8 @@ def test_gemini_judges_priority_places_then_newest_first():
     for o in offers.values():
         o.update(company="X", source="HelloWork", description="")
     h = FakeHandler()
-    cdi_relevance.check_offers(offers, "profil", h, max_checks=3, draft_letters=False, priority_places=IDF)
+    cdi_relevance.check_offers(offers, "profil", h, max_checks=3, draft_letters=False, priority_places=IDF,
+                                batch_size=1)
     assert h.seen == ["Intitulé : Massy récent", "Intitulé : Paris ancien", "Intitulé : Lyon récent"]
     assert offers["a"]["relevancy_check"] == "unchecked"          # waits for the next run
 
