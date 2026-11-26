@@ -1,4 +1,4 @@
-"""CDI Watcher: HelloWork + France Travail + APEC + LinkedIn + Adecco -> Gemini filter -> Telegram (+ cover letter draft).
+"""CDI Watcher: HelloWork + France Travail + APEC + LinkedIn + Adecco + CRIT -> Gemini filter -> Telegram (+ cover letter draft).
 
 Runs independently from the VIE watcher (src/main.py) and keeps its own store
 (data/cdi_offers.json) and metrics (docs/cdi_metrics.jsonl).
@@ -22,7 +22,7 @@ from . import contrats, dedupe, feedback, temps_travail
 from .cdi_relevance import check_offers, cv_text
 from .gemini_handler import GeminiHandler
 from .metrics import ErrorCounter
-from .sources import adecco, apec, francetravail, hellowork, linkedin
+from .sources import adecco, apec, crit, francetravail, hellowork, linkedin
 from .sources.common import SourceBlocked, new_session
 from .store import load_offers, save_offers
 from .telegram import enabled as telegram_enabled, escape_html, send_message
@@ -40,8 +40,8 @@ TELEGRAM_MAX_RETRIES = 5
 TELEGRAM_DELAY = 5
 TELEGRAM_LIMIT = 4000
 
-SOURCES = {"hellowork": hellowork, "adecco": adecco, "francetravail": francetravail, "apec": apec, "linkedin": linkedin}
-OPT_IN = {"adecco"}   # newer sources: off unless cdi_search.yaml turns them on (older files keep working as before)
+SOURCES = {"hellowork": hellowork, "adecco": adecco, "crit": crit, "francetravail": francetravail, "apec": apec, "linkedin": linkedin}
+OPT_IN = {"adecco", "crit"}   # newer sources: off unless cdi_search.yaml turns them on (older files keep working as before)
 error_counter = ErrorCounter()
 
 
@@ -251,6 +251,9 @@ def run():
     since = today - timedelta(days=settings.get("max_days", 21))
     stored = load_offers(STORE_PATH)
     log.info(f"{len(stored)} CDI offers already known.")
+    n_fixed = dedupe.unflag_wrong_duplicates(stored)
+    if n_fixed:
+        log.info(f"{n_fixed} agency offer(s) wrongly marked as duplicates: judged again.")
 
     # ---------------- Scraping
     session = new_session()

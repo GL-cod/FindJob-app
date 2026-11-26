@@ -25,11 +25,41 @@ def norm_company(company):
     return " ".join(c.split())
 
 
+# Temp agencies show their own name instead of the client's: the same title from the same
+# agency in two cities is two different jobs, so the place is part of the key for them.
+AGENCY_SOURCES = {"Adecco", "CRIT"}
+
+
+def norm_place(location):
+    """City part of a location: « Massy, Essonne » / « Neuilly-sur-Seine (92200) » -> massy / neuilly sur seine."""
+    first = re.split(r"[,(]", location or "")[0]
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", _plain(first)).split())
+
+
 def key(offer):
     title, company = norm_title(offer.get("title")), norm_company(offer.get("company"))
     if not title or not company:
         return None
+    if offer.get("source") in AGENCY_SOURCES:
+        return f"{company}|{title}|{norm_place(offer.get('location'))}"
     return f"{company}|{title}"
+
+
+def unflag_wrong_duplicates(offers):
+    """Agency offers flagged as duplicates by the older key (without the place): judge them again.
+
+    Returns the number of offers set back to « unchecked »."""
+    fixed = 0
+    for o in offers.values():
+        if o.get("relevancy_check") != "duplicate" or o.get("source") not in AGENCY_SOURCES:
+            continue
+        first = offers.get(o.get("duplicate_of"))
+        if first is not None and key(first) == key(o):
+            continue
+        o["relevancy_check"] = "unchecked"
+        o.pop("duplicate_of", None)
+        fixed += 1
+    return fixed
 
 
 def mark_duplicates(new_offers, known_offers):

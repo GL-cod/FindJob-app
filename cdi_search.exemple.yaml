@@ -1,4 +1,4 @@
-# Réglages de recherche du CDI Watcher (HelloWork, Adecco, LinkedIn, APEC).
+# Réglages de recherche du CDI Watcher (HelloWork, Adecco, CRIT, LinkedIn, APEC).
 # Version de départ pour une nouvelle personne : le workflow « Première installation »
 # la copie dans cdi_search.yaml.
 # Ce fichier ne contient rien de secret : tu peux le modifier directement sur GitHub.
@@ -90,6 +90,14 @@ adecco:
   # Départements ou villes ; vide = toute la France.
   lieux: [Paris, Hauts-de-Seine, Seine-Saint-Denis, Val-de-Marne, Essonne, Yvelines, Val-d'Oise, Seine-et-Marne]
   max_details_per_run: 80 # pages d'offres lues par passage (le reste au passage suivant)
+
+crit:
+  # Agence d'intérim CRIT (intérim, CDD, CDI) : pages de recherche publiques de crit-job.com,
+  # dates lues dans le plan du site public des offres, puis page de chaque offre retenue.
+  enabled: true
+  departements: [75, 77, 78, 91, 92, 93, 94, 95]   # Île-de-France ; vide = toute la France
+  pages_per_keyword: 2    # 20 offres par page
+  max_details_per_run: 80
 
 francetravail:
   # API officielle et gratuite (https://francetravail.io). Il faut les secrets GitHub

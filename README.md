@@ -4,7 +4,7 @@
 
 ## Ce que fait l'application
 
-- Elle cherche toute seule des offres d'emploi (CDI par défaut, temps plein ou partiel au choix) sur HelloWork et Adecco (depuis GitHub, avec France Travail en option), sur LinkedIn et sur l'APEC (depuis ton PC), et en option des offres de VIE.
+- Elle cherche toute seule des offres d'emploi (CDI par défaut, temps plein ou partiel au choix) sur HelloWork, Adecco et CRIT (depuis GitHub, avec France Travail en option), sur LinkedIn et sur l'APEC (depuis ton PC), et en option des offres de VIE.
 - Gemini, l'IA gratuite de Google, lit chaque offre et la compare à ton profil. Il donne une note sur 10, conseille le CV à envoyer et écarte ce qui ne te correspond pas.
 - Une application sur ton PC regroupe tout : ouvrir l'offre, « J'ai postulé », « Pas intéressé » (l'application apprend de tes refus), lettre de motivation en Word, CV adapté à l'offre à partir de tes CV PowerPoint, préparation d'entretien, statistiques.
 - En option, elle se relie à un Google Sheets de suivi de tes candidatures et à un onglet Réseau pour tes prises de contact.
@@ -85,10 +85,11 @@ Toujours sur GitHub, ouvre le fichier **`cdi_search.yaml`** de ta copie et cliqu
 
 - `hellowork` → `location` : écris ta ville ou ta région (exemple : `Lyon`).
 - `adecco` → `lieux` : tes départements ou villes (exemple : `[Rhône, Lyon]`).
+- `crit` → `departements` : tes numéros de département (exemple : `[69]`).
 - `linkedin` → `geo_id` : fais une recherche d'emploi sur LinkedIn dans ta région. L'adresse de la page contient `geoId=` suivi d'un nombre : c'est ce nombre.
 - `apec` → `lieu` : fais une recherche sur apec.fr en choisissant ta région, puis recopie le code de lieu qui apparaît dans l'adresse de la page.
 
-**Toute la France :** mets `location: ""` (HelloWork), `lieux: []` (Adecco), `geo_id: 105015875` (LinkedIn) et `lieu: ""` (APEC).
+**Toute la France :** mets `location: ""` (HelloWork), `lieux: []` (Adecco), `departements: []` (CRIT), `geo_id: 105015875` (LinkedIn) et `lieu: ""` (APEC).
 
 Ne mets **ni téléphone ni e-mail** dans ce fichier, il est public. Ton nom, tu le mettras sur le PC à l'étape 6.
 
@@ -209,7 +210,7 @@ Pour lancer du Python à la main sur le PC, utilise `.venv\Scripts\python.exe` :
 
 ## Comment ça marche (pour les curieux)
 
-- **Sur GitHub (Actions)** : `cdi_watch.yml` cherche les offres HelloWork et Adecco vers 12h et 19h en semaine ; `watch.yml` cherche les VIE quand cron-job.org le déclenche. Les offres déjà vues sont gardées dans `data/` pour ne jamais être jugées deux fois.
+- **Sur GitHub (Actions)** : `cdi_watch.yml` cherche les offres HelloWork, Adecco et CRIT vers 12h et 19h en semaine ; `watch.yml` cherche les VIE quand cron-job.org le déclenche. Les offres déjà vues sont gardées dans `data/` pour ne jamais être jugées deux fois.
 - **Sur ton PC** : une tâche planifiée Windows lance la recherche LinkedIn et APEC (ces sites bloquent les serveurs de GitHub). L'application (Streamlit, dossier `app/`) récupère les offres de GitHub avec Git et affiche tout.
 - **Gemini** (`src/cdi_relevance.py`, `src/relevance.py`) note chaque offre selon ton profil et le bloc `candidat` de `cdi_search.yaml`, et tient compte de tes refus (`data/feedback.json`).
 - **Limites** : les recherches lisent les pages publiques des sites. Si un site change ses pages, une source peut renvoyer 0 offre le temps de corriger le code. Le quota gratuit de Gemini est limité : la veille s'arrête proprement quand il est atteint et reprend au passage suivant.
