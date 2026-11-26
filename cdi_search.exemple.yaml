@@ -68,6 +68,10 @@ excluded_domains:
   - vente / commercial pur (prospection, objectifs de chiffre d'affaires)
   - centre d'appels, télévente
 
+# Lieux jugés en premier par Gemini (départements ou noms) : quand il y a plus d'offres que
+# max_checks_per_run, celles-ci passent d'abord, puis les plus récentes ; les autres attendent.
+priorite_lieux: [Île-de-France, 75, 77, 78, 91, 92, 93, 94, 95]
+
 # Nombre max d'offres jugées par Gemini à chaque exécution (le reste attend
 # l'exécution suivante). Protège le quota gratuit partagé avec le VIE Watcher.
 max_checks_per_run: 120
@@ -80,7 +84,8 @@ hellowork:
   enabled: true
   location: Île-de-France
   contracts: CDI          # utilisé seulement si « contrats » (plus haut) est absent
-  pages_per_keyword: 1    # 30 offres par page
+  tri: date               # date = les plus récentes d'abord (pages lues jusqu'aux offres déjà vues) ; pertinence sinon
+  pages_per_keyword: 3    # au plus, 30 offres par page
 
 adecco:
   # Agence d'intérim (intérim, CDD, CDI). Lit le plan du site public des offres d'Adecco

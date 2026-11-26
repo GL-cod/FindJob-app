@@ -1,6 +1,8 @@
 """HelloWork (hellowork.com) public search pages.
 
-Search page: /fr-fr/emploi/recherche.html?k=<keywords>&l=<location>&c=CDI&p=<page>
+Search page: /fr-fr/emploi/recherche.html?k=<keywords>&l=<location>&c=CDI&p=<page>&st=date
+  (st=date: newest first, so paging stops at the first page with nothing new; without it,
+  HelloWork sorts by relevance and recent offers can sit beyond the pages read)
   - 30 cards per page, each <li data-id-storage-item-id="<id>"> with
     input[name=title], input[name=company], [data-cy=localisationCard],
     [data-cy=contractCard] and a relative date ("il y a 5 jours").
@@ -93,9 +95,12 @@ def scrape(session, settings, stored, since, today=None):
     excluded = settings.get("excluded_title_words", [])
     found = {}
 
+    by_date = hw.get("tri", "date") == "date"
     for keyword in settings["keywords"]:
         for page in range(1, hw.get("pages_per_keyword", 1) + 1):
             params = {"k": keyword, "p": page}
+            if by_date:          # newest first: the offers of the last days are never pushed out
+                params["st"] = "date"
             if hw.get("location"):                   # vide = toute la France
                 params["l"] = hw["location"]
             c = contrats.hellowork_param(settings)   # liste = plusieurs contrats (c=CDI&c=CDD...)
@@ -112,15 +117,19 @@ def scrape(session, settings, stored, since, today=None):
             if not cards:
                 break
 
+            fresh = 0            # cards neither known nor too old on this page
             for c in cards:
                 key = PREFIX + c["id"]
                 if key in stored or key in found:
                     continue
                 if c["posted"] and c["posted"] < since:
                     continue
+                fresh += 1
                 if title_is_excluded(c["title"], excluded):
                     continue
                 found[key] = c
+            if by_date and not fresh:
+                break            # sorted by date: the next pages only hold offers already seen
 
     offers = {}
     for n, (key, c) in enumerate(found.items()):

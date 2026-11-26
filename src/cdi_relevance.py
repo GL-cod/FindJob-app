@@ -144,14 +144,48 @@ def parse_verdict(answer):
     return upper.startswith(("YES", "OUI", "TRUE")), candidat.default_cv(), "", 0
 
 
+def _plain(text):
+    import unicodedata
+    return unicodedata.normalize("NFKD", str(text or "")).encode("ascii", "ignore").decode().lower()
+
+
+def in_priority_places(location, places):
+    """Is the offer's place one of `places` (cdi_search.yaml, `priorite_lieux`)?
+
+    A number is a département: « Paris - 75 », « Neuilly (92200) », « 92 - Hauts-de-Seine ».
+    A name matches anywhere, accents and case ignored: « Massy, Essonne », « Paris, Île-de-France »."""
+    loc = _plain(location)
+    if not loc:
+        return False
+    for p in places or []:
+        p = str(p).strip()
+        if not p:
+            continue
+        if p.isdigit():
+            dep = p.zfill(2)
+            if re.search(rf"(?<!\d){dep}(?:\d{{3}})?(?!\d)", loc):
+                return True
+        elif re.search(rf"(?<![a-z]){re.escape(_plain(p))}(?![a-z])", loc):
+            return True
+    return False
+
+
+def judging_order(offers, places=()):
+    """Ids of the offers to judge: priority places first, then the newest (the rest waits)."""
+    todo = [(oid, o) for oid, o in offers.items() if o.get("relevancy_check") == "unchecked"]
+    todo.sort(key=lambda item: (in_priority_places(item[1].get("location"), places),
+                                item[1].get("posted") or item[1].get("first_seen") or ""), reverse=True)
+    return [oid for oid, _ in todo]
+
+
 def check_offers(offers, profile, handler, max_checks, save_func=None, draft_letters=True, max_years=3,
-                 excluded_domains=(), feedback_block="", work_time=None):
-    """Judge unchecked offers in place. Returns {id: offer} of newly relevant ones."""
+                 excluded_domains=(), feedback_block="", work_time=None, priority_places=()):
+    """Judge unchecked offers in place, priority places and newest first. Returns {id: offer} of
+    newly relevant ones."""
     relevant = {}
     checked = 0
-    for offer_id, offer in offers.items():
-        if offer.get("relevancy_check") != "unchecked":
-            continue
+    for offer_id in judging_order(offers, priority_places):
+        offer = offers[offer_id]
         if checked >= max_checks:
             log.info(f"Reached max_checks_per_run ({max_checks}); the rest waits for the next run.")
             break

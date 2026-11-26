@@ -966,6 +966,11 @@ with tab_offres:
         st.caption(f"{len(shown)} offre(s)"
                    + (f" · {len(stale_ids)} ancienne(s) non traitée(s) masquée(s) (⚙️ Plus pour les voir)"
                       if stale_ids and not show_old else ""))
+        waiting = sum(o.get("relevancy_check") == "unchecked" for o in offers)
+        if waiting:
+            st.caption(f"⏳ {waiting} offre(s) récupérée(s) attendent encore le tri de Gemini : elles apparaîtront "
+                       "ici si elles te correspondent, après les prochains passages (Île-de-France et plus récentes "
+                       "d'abord).")
         if not shown:
             st.info("Aucune offre ne correspond à tes filtres. Essaie d'élargir la recherche ou les statuts.")
         if set(statuses) == {"À regarder", "Entretien"}:

@@ -297,6 +297,7 @@ def run():
         excluded_domains=settings.get("excluded_domains") or [],
         feedback_block=feedback.prompt_block(lang="fr"),
         work_time=temps_travail.value(settings),
+        priority_places=settings.get("priorite_lieux") or [],
     )
     log.info(f"{len(relevant)} relevant offer(s).")
 
