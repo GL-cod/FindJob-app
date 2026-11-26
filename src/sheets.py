@@ -20,6 +20,9 @@ def configured():
 
 
 def norm_link(url):
+    m = re.search(r"adecco\.[a-z.]+/.*/offres-emploi/[^/?#]+/(\d+)", (url or "").lower())
+    if m:   # the slug of an Adecco link varies (« hf » / « h-f ») : the offer number is enough
+        return f"adecco:{m.group(1)}"
     return re.sub(r"[?#].*$", "", (url or "").strip()).rstrip("/").lower()
 
 

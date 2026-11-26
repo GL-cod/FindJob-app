@@ -238,7 +238,7 @@ def fetch_description(offer, cache_path=None):
 
 
 def _download_description(offer):
-    from .sources import apec, francetravail, hellowork, linkedin
+    from .sources import adecco, apec, francetravail, hellowork, linkedin
     from .sources.common import get_html, new_session
 
     session = new_session()
@@ -251,6 +251,8 @@ def _download_description(offer):
             return francetravail.fetch_description(session, oid[len(francetravail.PREFIX):])
         except Exception:
             return ""
+    if oid.startswith(adecco.PREFIX):
+        return adecco.fetch_description(session, offer["url"])
     if oid.startswith(apec.PREFIX):
         return apec.parse_detail(apec._get_json(session, apec.DETAIL_URL, {"numeroOffre": oid[len(apec.PREFIX):]}))
     if oid.startswith(linkedin.PREFIX):

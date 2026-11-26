@@ -12,6 +12,8 @@ import logging
 
 from bs4 import BeautifulSoup
 
+from .. import contrats
+
 from .common import (
     SourceBlocked, clean_text, get_html, get_html_patient, html_to_text, make_offer, parse_iso_date,
     parse_relative_date, polite_sleep, title_is_excluded,
@@ -96,8 +98,9 @@ def scrape(session, settings, stored, since, today=None):
             params = {"k": keyword, "p": page}
             if hw.get("location"):                   # vide = toute la France
                 params["l"] = hw["location"]
-            if hw.get("contracts"):
-                params["c"] = hw["contracts"]
+            c = contrats.hellowork_param(settings)   # liste = plusieurs contrats (c=CDI&c=CDD...)
+            if c:
+                params["c"] = c
 
             html = get_html(session, SEARCH_URL, params=params)
             polite_sleep()

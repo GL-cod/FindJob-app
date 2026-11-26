@@ -34,12 +34,15 @@ except ImportError:
     cv_pptx = None
 from src.gemini_handler import GeminiHandler  # noqa: E402
 
-SCHEDULE_TEXT = ("ainsi : VIE toutes les heures de 8h à 20h en semaine (GitHub), HelloWork et France Travail à 12h et 19h (GitHub), "
+SCHEDULE_TEXT = ("ainsi : VIE toutes les heures de 8h à 20h en semaine (GitHub), HelloWork, Adecco et France Travail à 12h et 19h (GitHub), "
                  "LinkedIn et APEC à 12h05 et 19h05 (sur ce PC, allumé et session ouverte)")
 STATUS_ICONS = {"À regarder": "🔵", "Candidaté": "📨", "Entretien": "🗓️",
                 "Refusé": "❌", "Pas intéressé": "⚪"}
-SOURCE_ICONS = {"HelloWork": "🟣", "France Travail": "🟢", "LinkedIn": "🔷", "VIE": "🌍", "APEC": "🟠"}
-SOURCES = ["VIE", "HelloWork", "France Travail", "APEC", "LinkedIn"]
+SOURCE_ICONS = {"HelloWork": "🟣", "France Travail": "🟢", "LinkedIn": "🔷", "VIE": "🌍", "APEC": "🟠",
+                "Adecco": "🔴"}
+SOURCES = ["VIE", "HelloWork", "Adecco", "France Travail", "APEC", "LinkedIn"]
+# Sources that existed before the saved filters knew them: a new source is shown by default
+OLD_SOURCES = ["VIE", "HelloWork", "France Travail", "APEC", "LinkedIn"]
 AUTO_REFRESH_MINUTES = 15
 PAGE_SIZE = 25
 JOURS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
@@ -491,8 +494,11 @@ def load_filters():
     except (OSError, ValueError):
         saved = {}
     choices = {"flt_sources": SOURCES, "flt_statuses": tracking.STATUSES}
+    known = saved.get("known_sources", OLD_SOURCES) if isinstance(saved, dict) else OLD_SOURCES
     for key, default in FILTER_DEFAULTS.items():
         value = saved.get(key, default) if isinstance(saved, dict) else default
+        if key == "flt_sources" and isinstance(value, list):
+            value = value + [s for s in SOURCES if s not in known and s not in value]
         if key in choices:
             value = [v for v in value if v in choices[key]] if isinstance(value, list) else default
         elif key == "flt_sort" and value not in SORTS:
@@ -506,7 +512,8 @@ def save_filters():
     """Called when a filter changes: the next opening of the app starts with the same filters."""
     try:
         FILTERS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        FILTERS_PATH.write_text(json.dumps({k: st.session_state.get(k, d) for k, d in FILTER_DEFAULTS.items()},
+        FILTERS_PATH.write_text(json.dumps({**{k: st.session_state.get(k, d) for k, d in FILTER_DEFAULTS.items()},
+                                            "known_sources": SOURCES},
                                            ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     except OSError:
         pass
@@ -823,7 +830,7 @@ with st.sidebar:
     if SHEETS_ON and not sheet_error and sheet.get("sheet_url"):
         st.button("📗 Ouvrir mon Google Sheets", on_click=open_external, args=(sheet["sheet_url"],), width="stretch")
     if st.button("🔄 Synchroniser maintenant", width="stretch",
-                 help="Récupère tout de suite les nouvelles offres VIE / HelloWork et relit ton Google Sheets"):
+                 help="Récupère tout de suite les nouvelles offres VIE / HelloWork / Adecco et relit ton Google Sheets"):
         with st.spinner("Synchronisation..."):
             tracked_pull()
             read_sheet.clear(wait=True)
@@ -878,7 +885,7 @@ else:
         st.warning(f"Google Sheets illisible pour l'instant : {sheet_error}")
 
 m = st.columns(6)
-m[0].metric("🎯 Offres retenues", n_retained, help="Offres VIE, HelloWork, France Travail, APEC et LinkedIn jugées pertinentes")
+m[0].metric("🎯 Offres retenues", n_retained, help="Offres VIE, HelloWork, Adecco, France Travail, APEC et LinkedIn jugées pertinentes")
 m[1].metric("🔵 À regarder", n_todo)
 m[2].metric("📨 Candidatures", sent, delta=f"+{week} cette semaine" if week else None,
             help="Toutes les lignes de ton Google Sheets" if SHEETS_ON and not sheet_error else None)
@@ -1300,7 +1307,7 @@ with tab_activite:
 
     st.subheader("Historique des passages")
     rows = tracking.read_metrics(tracking.LOCAL_METRICS, "PC (LinkedIn + APEC)") + \
-        tracking.read_metrics(tracking.GITHUB_METRICS, "GitHub (HelloWork)") + \
+        tracking.read_metrics(tracking.GITHUB_METRICS, "GitHub (HelloWork, Adecco)") + \
         tracking.read_metrics(tracking.VIE_METRICS, "GitHub (VIE)")
     rows.sort(key=lambda r: r["Date"], reverse=True)
     if rows:

@@ -7,6 +7,8 @@ Public page: /candidat/recherche-emploi.html/emploi/detail-offre/<numeroOffre>
 """
 import logging
 
+from .. import contrats
+
 from .common import (
     SourceBlocked, html_to_text, make_offer, parse_iso_date, polite_sleep, title_is_excluded,
 )
@@ -82,12 +84,13 @@ def parse_detail(data):
 def scrape(session, settings, stored, since, today=None):
     cfg = settings.get("apec", {})
     excluded = settings.get("excluded_title_words", [])
+    contrat = contrats.apec_param(settings)
     found = {}
     for keyword in settings["keywords"]:
         for page in range(cfg.get("pages_per_keyword", 1)):
             try:
                 data = _post_json(session, SEARCH_URL,
-                                  search_body(keyword, cfg.get("lieu", "711"), cfg.get("contrat", "101888"),
+                                  search_body(keyword, cfg.get("lieu", "711"), contrat,
                                               page * PAGE_SIZE))
             except SourceBlocked:
                 if not found:
@@ -125,6 +128,7 @@ def scrape(session, settings, stored, since, today=None):
         except Exception as e:
             log.warning(f"APEC detail failed for {c['id']}: {e}")
         offers[key] = make_offer("APEC", c["title"], c["company"], c["location"],
-                                 PUBLIC_URL.format(numero=c["id"]), c["posted"], contract="CDI",
+                                 PUBLIC_URL.format(numero=c["id"]), c["posted"],
+                                 contract="CDI" if contrat == "101888" else "",
                                  description=description)
     return offers

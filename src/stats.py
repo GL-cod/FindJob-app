@@ -44,7 +44,7 @@ def source_of(url):
         return "Sans lien"
     host = urlparse(u if "://" in u else "https://" + u).netloc
     for needle, name in (("linkedin", "LinkedIn"), ("indeed", "Indeed"), ("hellowork", "HelloWork"),
-                         ("apec", "APEC"), ("francetravail", "France Travail"), ("pole-emploi", "France Travail"), ("welcometothejungle", "Welcome to the Jungle"),
+                         ("apec", "APEC"), ("adecco", "Adecco"), ("francetravail", "France Travail"), ("pole-emploi", "France Travail"), ("welcometothejungle", "Welcome to the Jungle"),
                          ("businessfrance", "VIE (Business France)"), ("jobteaser", "JobTeaser"),
                          ("myworkdayjobs", "Site de l'entreprise"), ("careers", "Site de l'entreprise"),
                          ("recrutement", "Site de l'entreprise"), ("carrieres", "Site de l'entreprise")):

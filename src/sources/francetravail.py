@@ -15,7 +15,7 @@ import os
 import re
 import time
 
-from .. import temps_travail
+from .. import contrats, temps_travail
 from .common import SourceBlocked, make_offer, parse_iso_date, title_is_excluded
 
 log = logging.getLogger(__name__)
@@ -137,7 +137,7 @@ def to_offer(o):
 
 
 def scrape(session, settings, stored, since, today=None):
-    cfg = settings.get("francetravail", {})
+    cfg = {**settings.get("francetravail", {}), "contrat": contrats.francetravail_param(settings)}
     excluded = settings.get("excluded_title_words", [])
     try:
         token = get_token(session)

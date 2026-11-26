@@ -1,4 +1,4 @@
-# Réglages de recherche du CDI Watcher (HelloWork + LinkedIn).
+# Réglages de recherche du CDI Watcher (HelloWork, Adecco, LinkedIn, APEC).
 # Version de départ pour une nouvelle personne : le workflow « Première installation »
 # la copie dans cdi_search.yaml.
 # Ce fichier ne contient rien de secret : tu peux le modifier directement sur GitHub.
@@ -21,10 +21,15 @@ max_days: 21
 # (3 -> "3 ans" accepté, "4 ans", "5 ans minimum", "3 à 5 ans"... selon le minimum).
 max_experience_years: 3
 
+# Types de contrat recherchés, pour toutes les sources : CDI, CDD, interim
+# (ex. [CDI, CDD, interim]). Vide = tous les contrats. Les stages et alternances
+# restent écartés par les mots de l'intitulé (plus bas).
+contrats: [CDI]
+
 # Temps de travail recherché : plein, partiel ou tous.
 # LinkedIn et France Travail filtrent directement. Pour HelloWork et l'APEC, les offres
 # qui affichent l'autre temps de travail sont écartées, et Gemini trie le reste.
-# Pour un job à temps partiel, pense aussi à vider les champs contrat/contracts plus bas
+# Pour un job à temps partiel, pense aussi à ajouter CDD (et interim) dans « contrats »
 # (beaucoup de temps partiels sont en CDD) et à adapter ton profil.
 temps_de_travail: plein
 
@@ -74,8 +79,17 @@ run_hours: [12, 19]
 hellowork:
   enabled: true
   location: Île-de-France
-  contracts: CDI          # vide = tous contrats
+  contracts: CDI          # utilisé seulement si « contrats » (plus haut) est absent
   pages_per_keyword: 1    # 30 offres par page
+
+adecco:
+  # Agence d'intérim (intérim, CDD, CDI). Lit le plan du site public des offres d'Adecco
+  # (fait pour les moteurs de recherche), puis la page de chaque offre retenue.
+  # Pense à ajouter CDD et interim dans « contrats » pour en profiter pleinement.
+  enabled: true
+  # Départements ou villes ; vide = toute la France.
+  lieux: [Paris, Hauts-de-Seine, Seine-Saint-Denis, Val-de-Marne, Essonne, Yvelines, Val-d'Oise, Seine-et-Marne]
+  max_details_per_run: 80 # pages d'offres lues par passage (le reste au passage suivant)
 
 francetravail:
   # API officielle et gratuite (https://francetravail.io). Il faut les secrets GitHub

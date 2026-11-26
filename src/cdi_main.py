@@ -1,4 +1,4 @@
-"""CDI Watcher: HelloWork + France Travail + APEC + LinkedIn -> Gemini filter -> Telegram (+ cover letter draft).
+"""CDI Watcher: HelloWork + France Travail + APEC + LinkedIn + Adecco -> Gemini filter -> Telegram (+ cover letter draft).
 
 Runs independently from the VIE watcher (src/main.py) and keeps its own store
 (data/cdi_offers.json) and metrics (docs/cdi_metrics.jsonl).
@@ -18,11 +18,11 @@ from zoneinfo import ZoneInfo
 import requests
 import yaml
 
-from . import dedupe, feedback, temps_travail
+from . import contrats, dedupe, feedback, temps_travail
 from .cdi_relevance import check_offers, cv_text
 from .gemini_handler import GeminiHandler
 from .metrics import ErrorCounter
-from .sources import apec, francetravail, hellowork, linkedin
+from .sources import adecco, apec, francetravail, hellowork, linkedin
 from .sources.common import SourceBlocked, new_session
 from .store import load_offers, save_offers
 from .telegram import enabled as telegram_enabled, escape_html, send_message
@@ -40,7 +40,8 @@ TELEGRAM_MAX_RETRIES = 5
 TELEGRAM_DELAY = 5
 TELEGRAM_LIMIT = 4000
 
-SOURCES = {"hellowork": hellowork, "francetravail": francetravail, "apec": apec, "linkedin": linkedin}
+SOURCES = {"hellowork": hellowork, "adecco": adecco, "francetravail": francetravail, "apec": apec, "linkedin": linkedin}
+OPT_IN = {"adecco"}   # newer sources: off unless cdi_search.yaml turns them on (older files keep working as before)
 error_counter = ErrorCounter()
 
 
@@ -60,6 +61,7 @@ def load_settings(path=SETTINGS_PATH):
     if not settings.get("keywords"):
         raise ValueError("cdi_search.yaml: 'keywords' must list at least one keyword.")
     temps_travail.value(settings)   # clear error on a typo (plein / partiel / tous)
+    contrats.value(settings)        # same for contrats (CDI / CDD / interim)
     return settings
 
 
@@ -106,7 +108,7 @@ def selected_sources(settings):
         if unknown:
             raise ValueError(f"Unknown source(s) in CDI_SOURCES: {unknown}")
         return names
-    return [n for n in SOURCES if settings.get(n, {}).get("enabled", True)]
+    return [n for n in SOURCES if (settings.get(n) or {}).get("enabled", n not in OPT_IN)]
 
 
 def load_env():
