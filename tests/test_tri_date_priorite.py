@@ -78,3 +78,18 @@ def test_gemini_judges_priority_places_then_newest_first():
     cdi_relevance.check_offers(offers, "profil", h, max_checks=3, draft_letters=False, priority_places=IDF)
     assert h.seen == ["Intitulé : Massy récent", "Intitulé : Paris ancien", "Intitulé : Lyon récent"]
     assert offers["a"]["relevancy_check"] == "unchecked"          # waits for the next run
+
+
+def test_sites_take_turns_inside_each_group():
+    offers = {}
+    for i in range(5):
+        offers[f"hw_{i}"] = {"source": "HelloWork", "location": "Paris - 75", "posted": f"2026-11-2{i}",
+                             "relevancy_check": "unchecked"}
+    offers["ad_1"] = {"source": "Adecco", "location": "Massy, Essonne", "posted": "2026-11-10", "relevancy_check": "unchecked"}
+    offers["crit_1"] = {"source": "CRIT", "location": "Neuilly-sur-Seine (92200)", "posted": "2026-11-12",
+                        "relevancy_check": "unchecked"}
+    offers["crit_2"] = {"source": "CRIT", "location": "Lyon (69003)", "posted": "2026-11-26", "relevancy_check": "unchecked"}
+    order = cdi_relevance.judging_order(offers, IDF)
+    assert order[:3] == ["hw_4", "crit_1", "ad_1"]        # each site gets a turn, newest site first
+    assert order[3:6] == ["hw_3", "hw_2", "hw_1"]
+    assert order[-1] == "crit_2"                          # outside the priority places: last

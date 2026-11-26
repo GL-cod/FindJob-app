@@ -171,11 +171,24 @@ def in_priority_places(location, places):
 
 
 def judging_order(offers, places=()):
-    """Ids of the offers to judge: priority places first, then the newest (the rest waits)."""
-    todo = [(oid, o) for oid, o in offers.items() if o.get("relevancy_check") == "unchecked"]
-    todo.sort(key=lambda item: (in_priority_places(item[1].get("location"), places),
-                                item[1].get("posted") or item[1].get("first_seen") or ""), reverse=True)
-    return [oid for oid, _ in todo]
+    """Ids of the offers to judge: priority places first; inside each group, the sites take turns
+    (newest first on each), so a site with hundreds of new offers (HelloWork) does not take all
+    the judgments of a run while Adecco or CRIT wait."""
+    def newest(o):
+        return o.get("posted") or o.get("first_seen") or ""
+
+    groups = {True: {}, False: {}}
+    for oid, o in offers.items():
+        if o.get("relevancy_check") == "unchecked":
+            prio = in_priority_places(o.get("location"), places)
+            groups[prio].setdefault(o.get("source") or "", []).append((oid, o))
+    order = []
+    for prio in (True, False):
+        queues = [sorted(q, key=lambda item: newest(item[1]), reverse=True) for q in groups[prio].values()]
+        queues.sort(key=lambda q: newest(q[0][1]), reverse=True)
+        for rank in range(max((len(q) for q in queues), default=0)):
+            order.extend(q[rank][0] for q in queues if rank < len(q))
+    return order
 
 
 def check_offers(offers, profile, handler, max_checks, save_func=None, draft_letters=True, max_years=3,
