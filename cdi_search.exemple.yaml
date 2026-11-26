@@ -68,9 +68,9 @@ excluded_domains:
   - vente / commercial pur (prospection, objectifs de chiffre d'affaires)
   - centre d'appels, télévente
 
-# Offres envoyées ensemble à Gemini (une seule demande pour 10 offres : bien plus d'offres jugées
+# Offres envoyées ensemble à Gemini (une seule demande pour 5 offres : bien plus d'offres jugées
 # par passage). 1 = une par une.
-taille_lot: 10
+taille_lot: 5
 
 # Lieux jugés en premier par Gemini (départements ou noms) : quand il y a plus d'offres que
 # max_checks_per_run, celles-ci passent d'abord, puis les plus récentes ; les autres attendent.

@@ -330,7 +330,7 @@ def run():
         feedback_block=feedback.prompt_block(lang="fr"),
         work_time=temps_travail.value(settings),
         priority_places=settings.get("priorite_lieux") or [],
-        batch_size=settings.get("taille_lot", 10),
+        batch_size=settings.get("taille_lot", 5),
         describe=describe,
     )
     log.info(f"{len(relevant)} relevant offer(s).")

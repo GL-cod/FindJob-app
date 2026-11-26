@@ -71,7 +71,16 @@ def relevance_prompt(offer, profile, max_years=3, excluded_domains=(), feedback_
     )
 
 
-BATCH_DESC_CHARS = 3500     # per offer in a batch (the whole prompt stays reasonable)
+BATCH_DESC_CHARS = 3000     # per offer in a batch (the whole prompt stays reasonable)
+JUDGE_TEMPERATURE = 0       # same offer, same verdict (Gemini's default 1.0 gives varying verdicts)
+
+
+def ask(handler, prompt):
+    """A sorting question to Gemini, with a steady answer (temperature 0) when the handler allows it."""
+    try:
+        return handler.generate(prompt, temperature=JUDGE_TEMPERATURE)
+    except TypeError:            # handlers without the parameter (tests, older code)
+        return handler.generate(prompt)
 
 
 def batch_relevance_prompt(offers, profile, max_years=3, excluded_domains=(), feedback_block="", work_time=None):
@@ -82,10 +91,12 @@ def batch_relevance_prompt(offers, profile, max_years=3, excluded_domains=(), fe
         text = offer_text({**offer, "description": (offer.get("description") or "")[:BATCH_DESC_CHARS]})
         blocks.append(f"=== OFFRE {label} ===\n{text}")
     return (
-        f"Il y a {len(offers)} offres à juger, chacune séparément et avec les mêmes règles.\n" + rules +
-        "Réponds UNIQUEMENT avec un tableau JSON, un objet par offre, dans l'ordre, sans texte autour :\n"
-        '[{"offre": "<identifiant, ex. ' + offers[0][0] + '>", "relevant": true|false, "score": <0-10>, '
-        '"years_required": <entier>, "cv": ' + cv_choices + ', '
+        f"Il y a {len(offers)} offres à juger. Juge chacune SÉPARÉMENT, comme si elle était seule, avec les "
+        "mêmes règles : ne mélange jamais les informations de deux offres.\n" + rules +
+        "Réponds UNIQUEMENT avec un tableau JSON, un objet par offre, dans l'ordre, sans texte autour. "
+        "Recopie exactement l'identifiant et l'intitulé de chaque offre :\n"
+        '[{"offre": "<identifiant, ex. ' + offers[0][0] + '>", "intitule": "<intitulé de l\'offre, recopié>", '
+        '"relevant": true|false, "score": <0-10>, "years_required": <entier>, "cv": ' + cv_choices + ', '
         '"reason": "<une phrase courte en français qui justifie la note>"}, ...]\n\n'
         "=== PROFIL DU CANDIDAT ===\n" + profile + "\n\n" + "\n\n".join(blocks)
     )
@@ -106,8 +117,16 @@ def parse_batch(answer):
         if not isinstance(item, dict) or not item.get("offre"):
             continue
         one = json.dumps(item, ensure_ascii=False)
-        out[str(item["offre"]).strip()] = (*parse_verdict(one), parse_score(one))
+        out[str(item["offre"]).strip()] = (*parse_verdict(one), parse_score(one), str(item.get("intitule") or ""))
     return out
+
+
+def same_title(echo, title):
+    """Did Gemini answer about this offer? (its copy of the title starts like the real one)"""
+    a, b = _plain(echo), _plain(title)
+    a, b = re.sub(r"[^a-z0-9]+", "", a), re.sub(r"[^a-z0-9]+", "", b)
+    n = min(len(a), len(b), 20)
+    return n > 0 and a[:n] == b[:n]
 
 
 def letter_prompt(offer, profile, cv_key):
@@ -239,7 +258,7 @@ def judging_order(offers, places=()):
 
 
 def check_offers(offers, profile, handler, max_checks, save_func=None, draft_letters=True, max_years=3,
-                 excluded_domains=(), feedback_block="", work_time=None, priority_places=(), batch_size=10,
+                 excluded_domains=(), feedback_block="", work_time=None, priority_places=(), batch_size=5,
                  describe=None):
     """Judge unchecked offers in place, priority places first and the sites in turn.
 
@@ -282,7 +301,7 @@ def check_offers(offers, profile, handler, max_checks, save_func=None, draft_let
 
     def judge_alone(offer_id):
         try:
-            answer = handler.generate(relevance_prompt(offers[offer_id], profile, *rule_args))
+            answer = ask(handler, relevance_prompt(offers[offer_id], profile, *rule_args))
         except AllModelsExhausted:
             raise
         except Exception as e:
@@ -302,18 +321,21 @@ def check_offers(offers, profile, handler, max_checks, save_func=None, draft_let
                 return
             labelled = [(f"O{i + 1}", oid) for i, oid in enumerate(ids)]
             try:
-                answer = handler.generate(batch_relevance_prompt([(lab, offers[oid]) for lab, oid in labelled],
-                                                                 profile, *rule_args))
+                answer = ask(handler, batch_relevance_prompt([(lab, offers[oid]) for lab, oid in labelled],
+                                                             profile, *rule_args))
                 verdicts = parse_batch(answer)
             except AllModelsExhausted:
                 raise
             except Exception as e:
                 log.error(f"RELEVANCE ERROR - batch of {len(ids)} offer(s): {e}; judged one by one.")
                 verdicts = {}
+            # an answer whose title is not the offer's own (offers mixed up): judged again alone
+            verdicts = {lab: v for lab, v in verdicts.items()
+                        if lab in dict(labelled) and same_title(v[5], offers[dict(labelled)[lab]].get("title"))}
             missing = [oid for lab, oid in labelled if lab not in verdicts]
             for lab, oid in labelled:
                 if lab in verdicts:
-                    record(oid, verdicts[lab])
+                    record(oid, verdicts[lab][:5])
             if missing and verdicts:
                 log.warning(f"{len(missing)} offer(s) missing from a batch answer: judged one by one.")
             for oid in missing:

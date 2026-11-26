@@ -35,7 +35,7 @@ class GeminiHandler:
                 return model
         return None
 
-    def generate(self, prompt):
+    def generate(self, prompt, temperature=None):
         while True:
 
             model = self._pick_available()
@@ -45,7 +45,7 @@ class GeminiHandler:
 
             for attempt in range(GEMINI_MAX_RETRIES + 1):
                 try:
-                    answer = self._call(model, prompt)
+                    answer = self._call(model, prompt, temperature)
                     return answer
                 except requests.exceptions.HTTPError as e:
                     status = e.response.status_code if e.response is not None else None
@@ -70,7 +70,7 @@ class GeminiHandler:
 
                     continue
  
-    def _call(self, model, prompt):
+    def _call(self, model, prompt, temperature=None):
         url = GEMINI_URL.format(model=model.name)
         r = requests.post(
             url,
@@ -78,7 +78,8 @@ class GeminiHandler:
                 "Content-Type": "application/json",
                 "x-goog-api-key": self.api_key,
             },
-            json={"contents": [{"parts": [{"text": prompt}]}]},
+            json={"contents": [{"parts": [{"text": prompt}]}],
+                  **({"generationConfig": {"temperature": temperature}} if temperature is not None else {})},
             timeout=90,     # a batch of 10 offers takes longer than one
         )
         r.raise_for_status()

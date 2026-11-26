@@ -11,8 +11,8 @@ def offer(i, desc="Support utilisateurs, Windows.", **kw):
 class BatchHandler:
     """Answers a batch with one verdict per offer (relevant when the title number is even)."""
 
-    def __init__(self, drop=(), fail_batches=False):
-        self.prompts, self.drop, self.fail = [], set(drop), fail_batches
+    def __init__(self, drop=(), fail_batches=False, echo=None):
+        self.prompts, self.drop, self.fail, self.echo = [], set(drop), fail_batches, echo or {}
 
     def generate(self, prompt):
         self.prompts.append(prompt)
@@ -22,7 +22,7 @@ class BatchHandler:
         if "=== OFFRE O1 ===" in prompt:
             if self.fail:
                 raise TimeoutError("read timed out")
-            items = [{"offre": f"O{k + 1}", "relevant": int(t.split()[-1]) % 2 == 0, "score": 7,
+            items = [{"offre": f"O{k + 1}", "intitule": self.echo.get(t, t), "relevant": int(t.split()[-1]) % 2 == 0, "score": 7,
                       "years_required": 0, "cv": "informatique", "reason": f"verdict {t}"}
                      for k, t in enumerate(titles) if t not in self.drop]
             return "```json\n" + json.dumps(items, ensure_ascii=False) + "\n```"
@@ -41,6 +41,17 @@ def test_batches_of_ten():
     assert set(relevant) == {f"hw_{i}" for i in range(2, 24, 2)}
     assert offers["hw_4"]["reason"] == "verdict Poste 4" and offers["hw_4"]["score"] == 7
     assert offers["hw_4"]["letter"].startswith("Madame")   # letters still written one by one
+
+
+def test_mixed_up_answer_judged_alone():
+    offers = {f"hw_{i}": offer(i) for i in range(1, 4)}
+    offers["hw_2"]["title"] = "Data Scientist 2"
+    h = BatchHandler(echo={"Data Scientist 2": "Développeur .Net React"})   # Gemini talks about another offer
+    cdi_relevance.check_offers(offers, "profil", h, max_checks=100, batch_size=5, draft_letters=False)
+    assert offers["hw_2"]["reason"] == "seul Data Scientist 2"
+    assert offers["hw_1"]["reason"] == "verdict Poste 1"
+    assert cdi_relevance.same_title("Technicien Support N2 H/F", "Technicien support N2 (H/F)")
+    assert not cdi_relevance.same_title("Développeur .Net React", "Data Scientist")
 
 
 def test_missing_offer_judged_alone_and_failed_batch_falls_back():

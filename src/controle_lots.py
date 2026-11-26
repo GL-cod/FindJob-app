@@ -10,13 +10,14 @@ import sys
 
 from . import cdi_main, feedback, temps_travail
 from .cdi_relevance import (
-    batch_relevance_prompt, in_priority_places, parse_batch, parse_score, parse_verdict, relevance_prompt,
+    ask, batch_relevance_prompt, same_title, in_priority_places, parse_batch, parse_score, parse_verdict, relevance_prompt,
 )
 from .gemini_handler import GeminiHandler
 
 
-def main(n=30, batch_size=10):
+def main(n=30, batch_size=None):
     settings = cdi_main.load_settings()
+    batch_size = batch_size or settings.get("taille_lot", 5)
     env = cdi_main.load_env()
     places = settings.get("priorite_lieux") or []
     store = cdi_main.load_offers(cdi_main.STORE_PATH)
@@ -42,14 +43,15 @@ def main(n=30, batch_size=10):
              feedback.prompt_block(lang="fr"), temps_travail.value(settings))
     alone = []
     for o in sample:
-        a = handler.generate(relevance_prompt(o, env["USER_PROFILE"], *rules))
+        a = ask(handler, relevance_prompt(o, env["USER_PROFILE"], *rules))
         alone.append((*parse_verdict(a), parse_score(a)))
     grouped = {}
     for start in range(0, len(sample), batch_size):
         chunk = [(f"O{i + 1}", o) for i, o in enumerate(sample[start:start + batch_size])]
-        verdicts = parse_batch(handler.generate(batch_relevance_prompt(chunk, env["USER_PROFILE"], *rules)))
-        for i, (label, _) in enumerate(chunk):
-            grouped[start + i] = verdicts.get(label)
+        verdicts = parse_batch(ask(handler, batch_relevance_prompt(chunk, env["USER_PROFILE"], *rules)))
+        for i, (label, o) in enumerate(chunk):
+            v = verdicts.get(label)
+            grouped[start + i] = v if v and same_title(v[5], o.get("title")) else None
 
     same = missing = 0
     gaps = []
@@ -67,7 +69,7 @@ def main(n=30, batch_size=10):
         print(f"{o['title'][:55]:55} | {'oui' if a[0] else 'non'} {a[4]}/10 | {'oui' if b[0] else 'non'} {b[4]}/10{mark}")
     total = len(sample) - missing
     gap = f"{sum(gaps) / len(gaps):.1f}" if gaps else "-"
-    print(f"\nMême verdict (retenue ou non) : {same}/{total} ; absentes de la réponse groupée : {missing} ; "
+    print(f"\nMême verdict (retenue ou non) : {same}/{total} ; absentes ou mélangées dans la réponse groupée (rejugées seules par la veille) : {missing} ; "
           f"écart moyen de note : {gap} point(s)")
     return same, total
 
