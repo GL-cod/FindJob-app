@@ -23,6 +23,7 @@ DEFAULTS = {
     },
     "cv_vie": {"fr": "CV en français", "en": "CV en anglais"},
     "reseau": {"recherche": "", "exemple": "", "entreprises": []},
+    "consignes_lettre": [],
 }
 
 _cache = {"key": None, "data": None}
@@ -76,6 +77,14 @@ def signature_rule(lang="fr"):
     if lang == "en":
         return f'end with "{n}"' if n else "end with a short sign-off, without inventing a name"
     return f"suivie de « {n} »" if n else "sans inventer de nom (il sera ajouté à la main)"
+
+
+def letter_rules():
+    """Extra instructions for the cover letter (« consignes_lettre » in cdi_search.yaml)."""
+    raw = settings().get("consignes_lettre") or []
+    if isinstance(raw, str):
+        raw = [raw]
+    return [str(r).strip() for r in raw if str(r or "").strip()]
 
 
 # ------------------------------------------------------------------ CVs

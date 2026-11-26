@@ -65,3 +65,14 @@ def test_cv_choice_follows_the_configured_cvs(friend, tmp_path, monkeypatch):
     assert cdi_relevance.parse_verdict('{"relevant": true, "cv": "???"}')[1] == "commercial"
     assert candidat.cv_label("marketing") == "CV Marketing" and candidat.cv_label("inconnu") == ""
     assert '"commercial"|"marketing"' in cdi_relevance.relevance_prompt({"title": "x"}, "p")
+
+
+def test_letter_rules_go_into_letter_prompt(tmp_path, monkeypatch):
+    from src import candidat, cdi_relevance
+    cfg = tmp_path / "cdi_search.yaml"
+    cfg.write_text('candidat:\n  consignes_lettre:\n    - "Ne parle pas de spécialité XR."\n', encoding="utf-8")
+    monkeypatch.setattr(candidat, "SETTINGS_PATH", cfg)
+    assert candidat.letter_rules() == ["Ne parle pas de spécialité XR."]
+    prompt = cdi_relevance.letter_prompt({"title": "Dev", "company": "ACME"}, "profil", candidat.default_cv())
+    assert "- Ne parle pas de spécialité XR.\n" in prompt
+    assert prompt.index("spécialité XR") < prompt.index("=== PROFIL ===")

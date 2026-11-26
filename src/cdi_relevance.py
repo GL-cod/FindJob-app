@@ -75,8 +75,9 @@ def letter_prompt(offer, profile, cv_key):
         "- Fais le lien concret entre 2 ou 3 éléments du profil et les besoins de l'offre.\n"
         "- Pas d'en-tête (adresse, date, objet), commence par « Madame, Monsieur, » "
         f"et termine par une formule de politesse courte {candidat.signature_rule()}.\n"
-        "- Texte brut, sans markdown.\n\n"
-        "=== PROFIL ===\n" + profile + "\n\n"
+        "- Texte brut, sans markdown.\n"
+        + "".join(f"- {rule}\n" for rule in candidat.letter_rules()) +
+        "\n=== PROFIL ===\n" + profile + "\n\n"
         "=== OFFRE ===\n" + offer_text(offer)
     )
 

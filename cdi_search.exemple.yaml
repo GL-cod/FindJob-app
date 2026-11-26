@@ -139,6 +139,9 @@ candidat:
   cv_vie:
     fr: CV en français
     en: CV en anglais
+  # Consignes en plus pour les lettres de motivation (facultatif, une par ligne), ex. :
+  #   - "Ne parle pas de mon alternance."
+  consignes_lettre: []
   reseau:
     # Mots-clés ajoutés au nom de l'entreprise pour chercher des contacts sur LinkedIn.
     recherche: "chef de projet"
