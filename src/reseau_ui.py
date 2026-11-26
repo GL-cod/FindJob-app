@@ -142,6 +142,14 @@ def _ensure_threads(store):
             store["threads"][name] = t
 
 
+def prefetch():
+    """Start reading the Réseau sheet in the background (never waits), so the tab opens at once
+    even though it is only drawn when it is open."""
+    store = _store()
+    if reseau.configured() and store["data"] is None and not store.get("started"):
+        get_data()
+
+
 def get_data(force=False):
     """The sheet's data, without waiting for Google on the first display: the last copy kept on
     this PC is shown at once and the sheet is read in the background (watch_sheet redraws)."""

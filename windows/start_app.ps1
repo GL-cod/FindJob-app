@@ -11,7 +11,12 @@ $ServerLog = Join-Path $Root "logs\app_server.log"
 $ServerErr = Join-Path $Root "logs\app_server_err.log"
 
 function Test-Up {
-    try { (Invoke-WebRequest -Uri "$Url/_stcore/health" -UseBasicParsing -TimeoutSec 2).StatusCode -eq 200 } catch { $false }
+    # Port fermé : réponse en 0,4 s au lieu des 2 s que met Windows à refuser une connexion
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        if (-not $client.ConnectAsync("127.0.0.1", $Port).Wait(400)) { return $false }
+    } catch { return $false } finally { $client.Dispose() }
+    try { (Invoke-WebRequest -Uri "$Url/_stcore/health" -UseBasicParsing -TimeoutSec 3).StatusCode -eq 200 } catch { $false }
 }
 
 function Show-Error([string]$msg) {
@@ -28,6 +33,7 @@ if (-not (Test-Path $python)) {
 if ($Restart) {
     Start-Transcript -Path (Join-Path $Root "logs\restart.log") -Force | Out-Null
     Start-Sleep -Seconds 2   # laisse la page afficher son message
+    # La fenêtre ouverte se recharge toute seule quand le serveur revient (app\watchdog.js).
     Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" |
         Where-Object { $_.CommandLine -match "streamlit" -and $_.CommandLine -match "dashboard.py" } |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force }

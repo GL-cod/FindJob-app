@@ -132,17 +132,55 @@ def save_score(oid, score, reason, path=None):
         tmp.replace(path)
 
 
+# Parsed stores, kept while the file does not change: the page is drawn again at each click,
+# and reading + converting the ~7 MB of offer files every time made it slow.
+_STORE_CACHE = {}
+_CACHE_LOCK = threading.Lock()
+
+
+def _file_stamp(path):
+    try:
+        st = Path(path).stat()
+        return st.st_mtime_ns, st.st_size
+    except OSError:
+        return None
+
+
+def _cached(path, build):
+    """build(path) once per version of the file (None stamp = missing file, built each time)."""
+    key = (str(path), build.__name__)
+    stamp = _file_stamp(path)
+    with _CACHE_LOCK:
+        hit = _STORE_CACHE.get(key)
+        if hit is not None and stamp is not None and hit[0] == stamp:
+            return hit[1]
+    value = build(path)
+    if stamp is not None:
+        with _CACHE_LOCK:
+            _STORE_CACHE[key] = (stamp, value)
+    return value
+
+
+def _cdi_store(path):
+    return [{**o, "id": oid} for oid, o in _read_json(path, {}).items()]
+
+
+def _vie_store(path):
+    return [vie_offer(vid, o) for vid, o in _read_json(path, {}).items()]
+
+
 def load_offers(store_paths=None, suivi=None, vie_path=None, scores_path=None):
-    """All offers (CDI stores + VIE store + followed offers that expired), newest first."""
+    """All offers (CDI stores + VIE store + followed offers that expired), newest first.
+
+    Each offer is a fresh dict (the page adds status, notes...), built from cached parsed stores."""
     store_paths = (GITHUB_STORE, LOCAL_STORE) if store_paths is None else store_paths
     suivi = suivi if suivi is not None else load_suivi()
     offers = {}
     for p in store_paths:
-        for oid, o in _read_json(p, {}).items():
-            offers[oid] = {**o, "id": oid}
-    for vid, o in _read_json(vie_path or VIE_STORE, {}).items():
-        v = vie_offer(vid, o)
-        offers[v["id"]] = v
+        for o in _cached(p, _cdi_store):
+            offers[o["id"]] = dict(o)
+    for v in _cached(vie_path or VIE_STORE, _vie_store):
+        offers[v["id"]] = dict(v)
 
     for oid, sc in load_scores(scores_path).items():
         if oid in offers and offers[oid].get("score") is None and sc.get("score") is not None:
@@ -177,6 +215,14 @@ def update_suivi(suivi, offer, **fields):
 
 
 def read_metrics(path, source_label):
+    """Rows of a metrics file (kept in memory while the file does not change)."""
+    def build(p):
+        return _metrics_rows(p, source_label)
+    build.__name__ = f"metrics:{source_label}"
+    return [dict(r) for r in _cached(path, build)]
+
+
+def _metrics_rows(path, source_label):
     rows = []
     try:
         lines = Path(path).read_text(encoding="utf-8").splitlines()
@@ -203,11 +249,19 @@ def read_metrics(path, source_label):
     return rows
 
 
-def tail(path, n=80):
+def tail(path, n=80, max_bytes=64_000):
+    """Last n lines of a text file, reading only its end (the LinkedIn log grows all the time)."""
     try:
-        lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - max_bytes))
+            data = f.read()
     except FileNotFoundError:
         return ""
+    lines = data.decode("utf-8", errors="replace").splitlines()
+    if size > max_bytes and lines:
+        lines = lines[1:]          # first line was cut in the middle
     return "\n".join(lines[-n:])
 
 

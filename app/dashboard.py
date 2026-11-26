@@ -59,6 +59,10 @@ st.set_page_config(page_title="Mes candidatures", page_icon="💼", layout="wide
 # No greying of the page while it updates after a click
 st.markdown("<style>[data-stale='true'], .stale-element { opacity: 1 !important; transition: none !important; "
             "filter: none !important; }</style>", unsafe_allow_html=True)
+# Reloads the window by itself when it stays blank or disconnected (server restarted by an update,
+# PC back from sleep...): no more closing and reopening the app by hand.
+st.html("<script>" + (ROOT / "app" / "watchdog.js").read_text(encoding="utf-8") + "</script>",
+        unsafe_allow_javascript=True)
 cdi_main.load_dotenv()
 SHEETS_ON = sheets.configured()
 IS_DARK = True  # the app only has a dark theme (.streamlit/config.toml)
@@ -365,6 +369,13 @@ def letter_file(offer, letter, english, contact_stamp):
     return letter_docx.build(offer, letter, english=english)
 
 
+def letter_data(offer):
+    """The Word letter of an offer, built only when its download button is clicked."""
+    fields = {k: offer.get(k) for k in ("title", "company", "location", "url", "source")}
+    letter, english = offer["letter"], offer.get("cv") == "vie_en"
+    return lambda: letter_file(fields, letter, english, file_stamp(letter_docx.CONTACT_PATH))
+
+
 @st.cache_data(max_entries=100, show_spinner=False)
 def cv_file(path, stamp, changes):
     return cv_pptx.build(Path(path).read_bytes(), changes)
@@ -462,7 +473,8 @@ def render_cv(o, handler, profile):
         changes = done.get("modifications") or {}
         c1, c2 = st.columns([1, 2])
         c1.download_button(
-            "⬇️ Télécharger le CV (.pptx)", data=cv_file(str(path), file_stamp(path), changes),
+            "⬇️ Télécharger le CV (.pptx)", data=lambda: cv_file(str(path), file_stamp(path), changes),
+            on_click="ignore",
             file_name=cv_pptx.file_name(o, candidat.nom()), mime=cv_pptx.MIME,
             key=f"cvdl_{o['id']}", width="stretch")
         c2.caption(f"À partir de « {candidat.cv_label(done['modele']) or done['modele']} ». Ouvre-le dans "
@@ -485,10 +497,12 @@ def render_cv(o, handler, profile):
 
 
 def load_filters():
-    """Put the saved filters of the Offres tab in the session, once, keeping only values that still exist."""
-    if st.session_state.get("_filters_loaded"):
+    """Put the saved filters of the Offres tab in the session, keeping only values that still exist.
+
+    Called at each drawing of the tab: Streamlit forgets a widget's value while its tab is closed,
+    so coming back to the Offres tab takes the filters from the file again (saved at each change)."""
+    if all(k in st.session_state for k in FILTER_DEFAULTS):
         return
-    st.session_state._filters_loaded = True
     try:
         saved = json.loads(FILTERS_PATH.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -893,505 +907,520 @@ m[3].metric("⏳ En attente", pending)
 m[4].metric("✅ Positifs", positive)
 m[5].metric("❌ Négatifs", negative)
 
+handler, profile = gemini_and_profile()
+unscored = [o for o in retained if tracking.needs_score(o) and o["id"] not in stale_ids]
+if unscored and handler is not None:
+    tracking.start_scoring(unscored, handler, profile, scoring_state())
+if handler is None:
+    st.sidebar.warning("Lettres et préparations d'entretien indisponibles : il manque ta clé Gemini (.env) "
+                       "ou ton profil (profile_cdi.txt).")
+
+reseau_ui.prefetch()   # Réseau sheet read in the background, ready when its tab is opened
+
+# Only the open tab is drawn (on_change="rerun" + .open): the page answers much faster than when
+# the six tabs were all computed at each click. The open tab is remembered in st.session_state.onglet.
 tab_offres, tab_sheet, tab_reseau, tab_stats, tab_activite, tab_reglages = st.tabs(
-    ["📋 Offres", "📗 Mes candidatures", "🤝 Réseau", "📊 Statistiques", "⚙️ Activité", "🔎 Réglages"])
+    ["📋 Offres", "📗 Mes candidatures", "🤝 Réseau", "📊 Statistiques", "⚙️ Activité", "🔎 Réglages"],
+    key="onglet", on_change="rerun")
 
 # ----------------------------------------------------------------- Offres
 with tab_offres:
-    query = st.text_input("Rechercher", placeholder="🔍 Intitulé, entreprise, ville...", label_visibility="collapsed")
-    f1, f2, f3, f4 = st.columns([3, 3, 2, 1])
-    load_filters()   # filters are remembered between sessions (data/filtres_offres.json)
-    sources = f1.multiselect("Source", SOURCES, key="flt_sources", on_change=save_filters)
-    statuses = f2.multiselect("Statut", tracking.STATUSES, key="flt_statuses", on_change=save_filters,
-                              help="Les offres où tu as postulé sont masquées par défaut : ajoute « Candidaté » "
-                                   "pour les revoir, ou va dans l'onglet 📗 Mes candidatures.")
-    sort_by = f3.selectbox("Trier", SORTS, key="flt_sort", on_change=save_filters)
-    with f4.popover("⚙️ Plus", width="stretch"):
-        show_old = st.toggle(f"Offres de plus de {HIDE_AFTER_DAYS} jours", key="flt_old", on_change=save_filters,
-                             help=f"Affiche aussi les offres restées « À regarder » plus de {HIDE_AFTER_DAYS} jours "
-                                  "après leur arrivée dans l'application")
+    if tab_offres.open:
+        query = st.text_input("Rechercher", placeholder="🔍 Intitulé, entreprise, ville...", label_visibility="collapsed")
+        f1, f2, f3, f4 = st.columns([3, 3, 2, 1])
+        load_filters()   # filters are remembered between sessions (data/filtres_offres.json)
+        sources = f1.multiselect("Source", SOURCES, key="flt_sources", on_change=save_filters)
+        statuses = f2.multiselect("Statut", tracking.STATUSES, key="flt_statuses", on_change=save_filters,
+                                  help="Les offres où tu as postulé sont masquées par défaut : ajoute « Candidaté » "
+                                       "pour les revoir, ou va dans l'onglet 📗 Mes candidatures.")
+        sort_by = f3.selectbox("Trier", SORTS, key="flt_sort", on_change=save_filters)
+        with f4.popover("⚙️ Plus", width="stretch"):
+            show_old = st.toggle(f"Offres de plus de {HIDE_AFTER_DAYS} jours", key="flt_old", on_change=save_filters,
+                                 help=f"Affiche aussi les offres restées « À regarder » plus de {HIDE_AFTER_DAYS} jours "
+                                      "après leur arrivée dans l'application")
 
-    pool = retained
-    if not show_old:
-        pool = [o for o in pool if o["id"] not in stale_ids]
-    q = query.lower().strip()
-    shown = [
-        o for o in pool
-        if o.get("source") in sources and o["status"] in statuses
-        and (not q or q in f"{o.get('title','')} {o.get('company','')} {o.get('location','')}".lower())
-    ]
-    if sort_by == SORTS[0]:
-        shown.sort(key=lambda o: (o.get("score") is not None, o.get("score") or 0, o.get("posted") or ""),
-                   reverse=True)
-    elif sort_by == SORTS[2]:
-        shown.sort(key=lambda o: (seen_on.get(o["id"], ""), o.get("posted") or ""), reverse=True)
-    elif sort_by == SORTS[3]:
-        shown.sort(key=lambda o: (o.get("company") or "").lower())
+        pool = retained
+        if not show_old:
+            pool = [o for o in pool if o["id"] not in stale_ids]
+        q = query.lower().strip()
+        shown = [
+            o for o in pool
+            if o.get("source") in sources and o["status"] in statuses
+            and (not q or q in f"{o.get('title','')} {o.get('company','')} {o.get('location','')}".lower())
+        ]
+        if sort_by == SORTS[0]:
+            shown.sort(key=lambda o: (o.get("score") is not None, o.get("score") or 0, o.get("posted") or ""),
+                       reverse=True)
+        elif sort_by == SORTS[2]:
+            shown.sort(key=lambda o: (seen_on.get(o["id"], ""), o.get("posted") or ""), reverse=True)
+        elif sort_by == SORTS[3]:
+            shown.sort(key=lambda o: (o.get("company") or "").lower())
 
-    # reset the page when filters change
-    _filters = (tuple(sources), tuple(statuses), sort_by, q, show_old)
-    if st.session_state.get("offer_filters") != _filters:
-        st.session_state.offer_filters = _filters
-        st.session_state.offer_limit = PAGE_SIZE
-    limit = st.session_state.get("offer_limit", PAGE_SIZE)
+        # reset the page when filters change
+        _filters = (tuple(sources), tuple(statuses), sort_by, q, show_old)
+        if st.session_state.get("offer_filters") != _filters:
+            st.session_state.offer_filters = _filters
+            st.session_state.offer_limit = PAGE_SIZE
+        limit = st.session_state.get("offer_limit", PAGE_SIZE)
 
-    st.caption(f"{len(shown)} offre(s)"
-               + (f" · {len(stale_ids)} ancienne(s) non traitée(s) masquée(s) (⚙️ Plus pour les voir)"
-                  if stale_ids and not show_old else ""))
-    if not shown:
-        st.info("Aucune offre ne correspond à tes filtres. Essaie d'élargir la recherche ou les statuts.")
-    if set(statuses) == {"À regarder", "Entretien"}:
-        st.caption("Les offres où tu as postulé, refusées ou marquées « pas intéressé » sont masquées : ajoute leur statut dans "
-                   "le filtre « Statut » pour les revoir.")
+        st.caption(f"{len(shown)} offre(s)"
+                   + (f" · {len(stale_ids)} ancienne(s) non traitée(s) masquée(s) (⚙️ Plus pour les voir)"
+                      if stale_ids and not show_old else ""))
+        if not shown:
+            st.info("Aucune offre ne correspond à tes filtres. Essaie d'élargir la recherche ou les statuts.")
+        if set(statuses) == {"À regarder", "Entretien"}:
+            st.caption("Les offres où tu as postulé, refusées ou marquées « pas intéressé » sont masquées : ajoute leur statut dans "
+                       "le filtre « Statut » pour les revoir.")
 
-    rejections = feedback.load()
-    handler, profile = gemini_and_profile()
+        rejections = feedback.load()
+        scoring_progress()
 
-    unscored = [o for o in retained if tracking.needs_score(o) and o["id"] not in stale_ids]
-    if unscored and handler is not None:
-        tracking.start_scoring(unscored, handler, profile, scoring_state())
-    scoring_progress()
-    if handler is None:
-        st.sidebar.warning("Lettres et préparations d'entretien indisponibles : il manque ta clé Gemini (.env) "
-                           "ou ton profil (profile_cdi.txt).")
+        for o in shown[:limit]:
+            badge = STATUS_ICONS.get(o["status"], "")
+            src = SOURCE_ICONS.get(o.get("source"), "")
+            date = fr_date(o.get("posted") or o.get("first_seen"))
+            stars = f"⭐ {o['score']}/10 · " if o.get("score") is not None else ""
+            label = (("🆕 " if is_new(o) and o["status"] == "À regarder" else "")
+                     + f"{badge} {stars}**{o.get('title','')}** · {o.get('company','')}  —  {src} {o.get('source','')}"
+                     + (f" · {date}" if date else ""))
+            if o.get("expired"):
+                label += " · _expirée_"
+            if o.get("in_sheet") is not None:
+                label += f" · 📗 déjà dans ton Sheets ({o['in_sheet'] or 'sans retour'})"
 
-    for o in shown[:limit]:
-        badge = STATUS_ICONS.get(o["status"], "")
-        src = SOURCE_ICONS.get(o.get("source"), "")
-        date = fr_date(o.get("posted") or o.get("first_seen"))
-        stars = f"⭐ {o['score']}/10 · " if o.get("score") is not None else ""
-        label = (("🆕 " if is_new(o) and o["status"] == "À regarder" else "")
-                 + f"{badge} {stars}**{o.get('title','')}** · {o.get('company','')}  —  {src} {o.get('source','')}"
-                 + (f" · {date}" if date else ""))
-        if o.get("expired"):
-            label += " · _expirée_"
-        if o.get("in_sheet") is not None:
-            label += f" · 📗 déjà dans ton Sheets ({o['in_sheet'] or 'sans retour'})"
-
-        with st.expander(label):
-            left, right = st.columns([3, 2])
-            with left:
-                st.markdown(
-                    f"📍 {o.get('location') or '—'}  \n"
-                    f"📝 {o.get('contract') or 'contrat non précisé'}  \n"
-                    + (f"📄 CV conseillé : **{candidat.cv_label(o['cv'])}**" if candidat.cv_label(o.get("cv")) else "")
-                )
-                if o.get("reason"):
-                    st.markdown(f"💬 _{o['reason']}_")
-                b_open, b_applied, b_no = st.columns(3)
-                b_open.button("↗ Ouvrir l'offre", key=f"open_{o['id']}", on_click=open_external, args=(o["url"],),
-                              type="primary", width="stretch")
-                if o["status"] == "À regarder":
-                    b_applied.button("✅ J'ai postulé", key=f"applied_{o['id']}", on_click=mark_applied, args=(o,),
-                                     help="Passe l'offre en « Candidaté » et l'ajoute à ton Google Sheets",
-                                     width="stretch")
-                    b_no.button("❌ Pas intéressé", key=f"no_{o['id']}", on_click=mark_rejected, args=(o,),
-                                help="Écarte l'offre ; le filtre apprendra de ta raison", width="stretch")
-            with right:
-                if o["status"] != "À regarder":
-                    st.markdown(f"{STATUS_ICONS.get(o['status'], '')} **{o['status']}**"
-                                + (f" · le {o['status_updated']}" if o.get("status_updated") else ""))
-                    if o["status"] in ("Candidaté", "Pas intéressé"):
-                        st.button("↩️ Annuler", key=f"undo_{o['id']}", on_click=mark_todo, args=(o,),
-                                  help="Remet l'offre « À regarder ». Une ligne déjà ajoutée au Google Sheets y reste.")
-                if o["status"] == "Pas intéressé":
-                    known = next((e.get("reason", "") for e in rejections if e.get("id") == o["id"]), "")
-                    why = st.text_input("Pourquoi ? (le filtre apprend de ta réponse)", value=known,
-                                        key=f"why_{o['id']}", placeholder="Ex. : trop commercial, trop loin, que du support...")
-                    if why != known and st.button("Enregistrer la raison", key=f"savewhy_{o['id']}"):
-                        save_rejection(o, why)
-                        st.rerun()
-                note = st.text_area("Notes", value=o["note"], key=f"note_{o['id']}", height=90,
-                                    placeholder="Contact, date de relance, retour du recruteur...")
-                if note != o["note"] and st.button("Enregistrer la note", key=f"savenote_{o['id']}"):
-                    save_field(o, note=note)
-                    if SHEETS_ON and o["status"] in sheets.RETOUR:
-                        try:
-                            sheets.update_comment(o, note)
-                        except Exception as e:
-                            st.warning(f"Note enregistrée ici, mais pas dans le Google Sheets : {e}")
-                    st.rerun()
-
-            st.markdown("**✉️ Lettre de motivation**")
-            if o["letter"]:
-                st.code(o["letter"], language=None, wrap_lines=True)
-                if letter_docx is not None:
-                    d1, d2 = st.columns([1, 2])
-                    d1.download_button(
-                        "⬇️ Télécharger en Word (.docx)",
-                        data=letter_file({k: o.get(k) for k in ("title", "company", "location", "url", "source")},
-                                         o["letter"], o.get("cv") == "vie_en", file_stamp(letter_docx.CONTACT_PATH)),
-                        file_name=letter_docx.file_name(o), key=f"docx_{o['id']}", width="stretch",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            card = st.expander(label, key=f"carte_{o['id']}", on_change="rerun")
+            if not card.open:          # closed card: nothing to compute (letters, CV, buttons...)
+                continue
+            with card:
+                left, right = st.columns([3, 2])
+                with left:
+                    st.markdown(
+                        f"📍 {o.get('location') or '—'}  \n"
+                        f"📝 {o.get('contract') or 'contrat non précisé'}  \n"
+                        + (f"📄 CV conseillé : **{candidat.cv_label(o['cv'])}**" if candidat.cv_label(o.get("cv")) else "")
                     )
-                    if not letter_docx.load_contact().get("telephone"):
-                        d2.caption("Ajoute ton téléphone et ton e-mail dans 🔎 Réglages pour qu'ils figurent en haut "
-                                   "de la lettre.")
-                    else:
-                        d2.caption("Relis et adapte avant d'envoyer. Le fichier arrive dans ton dossier Téléchargements.")
-                else:
-                    st.caption("Téléchargement Word indisponible : relance windows\\start_app.ps1 (installe python-docx).")
-            if st.session_state.get("letter_warning") == o["id"]:
-                st.warning(f"{o.get('source', 'Le site')} limite les accès en ce moment : la lettre a été écrite "
-                           "sans la description complète de l'offre. Relis-la bien, ou régénère-la plus tard.")
-            if handler is not None and st.button("Régénérer la lettre" if o["letter"] else "Générer la lettre", key=f"letter_{o['id']}"):
-                st.session_state.pop("letter_warning", None)
-                with st.spinner("Récupération de l'offre et rédaction..."):
-                    try:
-                        desc = o.get("description") or tracking.fetch_description(o)
-                        letter = tracking.generate_letter(o, handler, profile, description=desc)
-                        save_field(o, letter=letter)
-                        if not desc:
-                            st.session_state["letter_warning"] = o["id"]
+                    if o.get("reason"):
+                        st.markdown(f"💬 _{o['reason']}_")
+                    b_open, b_applied, b_no = st.columns(3)
+                    b_open.button("↗ Ouvrir l'offre", key=f"open_{o['id']}", on_click=open_external, args=(o["url"],),
+                                  type="primary", width="stretch")
+                    if o["status"] == "À regarder":
+                        b_applied.button("✅ J'ai postulé", key=f"applied_{o['id']}", on_click=mark_applied, args=(o,),
+                                         help="Passe l'offre en « Candidaté » et l'ajoute à ton Google Sheets",
+                                         width="stretch")
+                        b_no.button("❌ Pas intéressé", key=f"no_{o['id']}", on_click=mark_rejected, args=(o,),
+                                    help="Écarte l'offre ; le filtre apprendra de ta raison", width="stretch")
+                with right:
+                    if o["status"] != "À regarder":
+                        st.markdown(f"{STATUS_ICONS.get(o['status'], '')} **{o['status']}**"
+                                    + (f" · le {o['status_updated']}" if o.get("status_updated") else ""))
+                        if o["status"] in ("Candidaté", "Pas intéressé"):
+                            st.button("↩️ Annuler", key=f"undo_{o['id']}", on_click=mark_todo, args=(o,),
+                                      help="Remet l'offre « À regarder ». Une ligne déjà ajoutée au Google Sheets y reste.")
+                    if o["status"] == "Pas intéressé":
+                        known = next((e.get("reason", "") for e in rejections if e.get("id") == o["id"]), "")
+                        why = st.text_input("Pourquoi ? (le filtre apprend de ta réponse)", value=known,
+                                            key=f"why_{o['id']}", placeholder="Ex. : trop commercial, trop loin, que du support...")
+                        if why != known and st.button("Enregistrer la raison", key=f"savewhy_{o['id']}"):
+                            save_rejection(o, why)
+                            st.rerun()
+                    note = st.text_area("Notes", value=o["note"], key=f"note_{o['id']}", height=90,
+                                        placeholder="Contact, date de relance, retour du recruteur...")
+                    if note != o["note"] and st.button("Enregistrer la note", key=f"savenote_{o['id']}"):
+                        save_field(o, note=note)
+                        if SHEETS_ON and o["status"] in sheets.RETOUR:
+                            try:
+                                sheets.update_comment(o, note)
+                            except Exception as e:
+                                st.warning(f"Note enregistrée ici, mais pas dans le Google Sheets : {e}")
                         st.rerun()
-                    except Exception as e:
-                        st.error(f"Impossible de générer la lettre : {e}")
 
-            st.markdown("**📄 CV adapté à l'offre**")
-            if cv_pptx is None:
-                st.caption("Indisponible : relance windows\\start_app.ps1 (installe python-pptx).")
-            elif not cv_pptx.available_models():
-                st.caption("Ajoute tes CV PowerPoint dans l'onglet 🔎 Réglages pour pouvoir les adapter à chaque offre.")
-            else:
-                render_cv(o, handler, profile)
-
-            if o["status"] == "Entretien" or o.get("prep"):
-                st.markdown("**🎯 Préparation d'entretien**")
-                if o.get("prep"):
-                    with st.container(border=True):
-                        st.markdown(o["prep"])
-                if handler is not None and st.button("Régénérer la préparation" if o.get("prep") else
-                                                     "Préparer l'entretien", key=f"prep_{o['id']}"):
-                    with st.spinner("Préparation de l'entretien..."):
+                st.markdown("**✉️ Lettre de motivation**")
+                if o["letter"]:
+                    st.code(o["letter"], language=None, wrap_lines=True)
+                    if letter_docx is not None:
+                        d1, d2 = st.columns([1, 2])
+                        d1.download_button(
+                            "⬇️ Télécharger en Word (.docx)",
+                            # built only when the button is clicked (not at each drawing of the page)
+                            data=letter_data(o),
+                            on_click="ignore",
+                            file_name=letter_docx.file_name(o), key=f"docx_{o['id']}", width="stretch",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        )
+                        if not letter_docx.load_contact().get("telephone"):
+                            d2.caption("Ajoute ton téléphone et ton e-mail dans 🔎 Réglages pour qu'ils figurent en haut "
+                                       "de la lettre.")
+                        else:
+                            d2.caption("Relis et adapte avant d'envoyer. Le fichier arrive dans ton dossier Téléchargements.")
+                    else:
+                        st.caption("Téléchargement Word indisponible : relance windows\\start_app.ps1 (installe python-docx).")
+                if st.session_state.get("letter_warning") == o["id"]:
+                    st.warning(f"{o.get('source', 'Le site')} limite les accès en ce moment : la lettre a été écrite "
+                               "sans la description complète de l'offre. Relis-la bien, ou régénère-la plus tard.")
+                if handler is not None and st.button("Régénérer la lettre" if o["letter"] else "Générer la lettre", key=f"letter_{o['id']}"):
+                    st.session_state.pop("letter_warning", None)
+                    with st.spinner("Récupération de l'offre et rédaction..."):
                         try:
-                            save_field(o, prep=tracking.generate_interview_prep(o, handler, profile))
+                            desc = o.get("description") or tracking.fetch_description(o)
+                            letter = tracking.generate_letter(o, handler, profile, description=desc)
+                            save_field(o, letter=letter)
+                            if not desc:
+                                st.session_state["letter_warning"] = o["id"]
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Impossible de préparer l'entretien : {e}")
+                            st.error(f"Impossible de générer la lettre : {e}")
 
-    if len(shown) > limit:
-        if st.button(f"Afficher plus ({len(shown) - limit} restante(s))", width="stretch"):
-            st.session_state.offer_limit = limit + PAGE_SIZE
-            st.rerun()
+                st.markdown("**📄 CV adapté à l'offre**")
+                if cv_pptx is None:
+                    st.caption("Indisponible : relance windows\\start_app.ps1 (installe python-pptx).")
+                elif not cv_pptx.available_models():
+                    st.caption("Ajoute tes CV PowerPoint dans l'onglet 🔎 Réglages pour pouvoir les adapter à chaque offre.")
+                else:
+                    render_cv(o, handler, profile)
+
+                if o["status"] == "Entretien" or o.get("prep"):
+                    st.markdown("**🎯 Préparation d'entretien**")
+                    if o.get("prep"):
+                        with st.container(border=True):
+                            st.markdown(o["prep"])
+                    if handler is not None and st.button("Régénérer la préparation" if o.get("prep") else
+                                                         "Préparer l'entretien", key=f"prep_{o['id']}"):
+                        with st.spinner("Préparation de l'entretien..."):
+                            try:
+                                save_field(o, prep=tracking.generate_interview_prep(o, handler, profile))
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Impossible de préparer l'entretien : {e}")
+
+        if len(shown) > limit:
+            if st.button(f"Afficher plus ({len(shown) - limit} restante(s))", width="stretch"):
+                st.session_state.offer_limit = limit + PAGE_SIZE
+                st.rerun()
 
 # ----------------------------------------------------------------- Mes candidatures (Sheets)
 with tab_sheet:
-    if not SHEETS_ON:
-        st.info("Ton Google Sheets n'est pas relié. Lance windows\\setup.ps1 et réponds O à l'étape Google Sheets "
-                "(voir windows/LISEZMOI.md).")
-    elif sheet_error:
-        st.error(f"Impossible de lire ton Google Sheets : {sheet_error}")
-        if st.button("🔄 Réessayer", key="retry_sheet"):
-            with st.spinner("Lecture du Google Sheets..."):
-                read_sheet.clear(wait=True)
-            st.session_state.sheet_reloaded = True
-            st.rerun()
-    else:
-        rows = sheet["rows"]
-        top1, top2, top3 = st.columns([3, 1, 1])
-        top1.caption(f"{len(rows)} candidature(s) · lu à {sheet['read_at']} (relu toutes les 5 minutes et "
-                     "après chaque « J'ai postulé »)")
-        if sheet["sheet_url"]:
-            top2.button("Ouvrir le Google Sheets ↗", on_click=open_external, args=(sheet["sheet_url"],))
-        if top3.button("🔄 Relire maintenant"):
-            with st.spinner("Lecture du Google Sheets..."):
-                read_sheet.clear(wait=True)
-            st.session_state.sheet_reloaded = True
-            st.rerun()
-        if sheet["version"] < 2:
-            st.warning("Ton script Google est une ancienne version : les dates et commentaires n'arrivent pas. "
-                       "Mets-le à jour (voir le message de Claude ou google_sheets/apps_script.gs), puis "
-                       "Déployer > Gérer les déploiements > crayon > Nouvelle version.")
-
-        view_mode = st.segmented_control("Affichage", ["🗂️ Cartes", "📋 Tableau"], default="🗂️ Cartes",
-                                         key="sheet_view", label_visibility="collapsed") or "🗂️ Cartes"
-        if view_mode == "🗂️ Cartes":
-            render_application_cards(rows, sheet["version"] >= 3)
+    if tab_sheet.open:
+        if not SHEETS_ON:
+            st.info("Ton Google Sheets n'est pas relié. Lance windows\\setup.ps1 et réponds O à l'étape Google Sheets "
+                    "(voir windows/LISEZMOI.md).")
+        elif sheet_error:
+            st.error(f"Impossible de lire ton Google Sheets : {sheet_error}")
+            if st.button("🔄 Réessayer", key="retry_sheet"):
+                with st.spinner("Lecture du Google Sheets..."):
+                    read_sheet.clear(wait=True)
+                st.session_state.sheet_reloaded = True
+                st.rerun()
         else:
-            retours = sorted({(r.get("retour") or "Sans retour") for r in rows})
-            g1, g2 = st.columns([2, 3])
-            pick = g1.multiselect("Retour", retours, default=retours)
-            q2 = g2.text_input("Rechercher (poste, entreprise, commentaire)", key="sheet_q").lower().strip()
-            table = [
-                {"_row": r.get("row"), "N": r.get("n", ""), "Poste": r.get("poste", ""),
-                 "Entreprise": r.get("entreprise", ""), "Date": r.get("date", ""), "Retour": r.get("retour") or "",
-                 "Lien": r.get("url") or r.get("lien") or "", "Commentaire": r.get("commentaire", "")}
-                for r in rows
-                if (r.get("retour") or "Sans retour") in pick
-                and (not q2 or q2 in f"{r.get('poste','')} {r.get('entreprise','')} {r.get('commentaire','')}".lower())
-            ]
-            table.sort(key=lambda r: int(r["N"]) if str(r["N"]).isdigit() else 0, reverse=True)
-            columns = ["N", "Poste", "Entreprise", "Date", "Retour", "Lien", "Commentaire"]
+            rows = sheet["rows"]
+            top1, top2, top3 = st.columns([3, 1, 1])
+            top1.caption(f"{len(rows)} candidature(s) · lu à {sheet['read_at']} (relu toutes les 5 minutes et "
+                         "après chaque « J'ai postulé »)")
+            if sheet["sheet_url"]:
+                top2.button("Ouvrir le Google Sheets ↗", on_click=open_external, args=(sheet["sheet_url"],))
+            if top3.button("🔄 Relire maintenant"):
+                with st.spinner("Lecture du Google Sheets..."):
+                    read_sheet.clear(wait=True)
+                st.session_state.sheet_reloaded = True
+                st.rerun()
+            if sheet["version"] < 2:
+                st.warning("Ton script Google est une ancienne version : les dates et commentaires n'arrivent pas. "
+                           "Mets-le à jour (voir le message de Claude ou google_sheets/apps_script.gs), puis "
+                           "Déployer > Gérer les déploiements > crayon > Nouvelle version.")
 
-            can_edit = sheet["version"] >= 3
-            edit_mode = st.toggle("✏️ Modifier", key="sheet_edit_mode", disabled=not can_edit,
-                                  help="Modifie les cases directement, puis enregistre : ton Google Sheets est mis à jour."
-                                  if can_edit else "Mets d'abord ton script Google à jour (version 3).")
-            if not can_edit:
-                st.caption("Pour modifier ton Sheets depuis ici, mets à jour ton script Google "
-                           "(google_sheets/apps_script.gs) puis Déployer > Gérer les déploiements > Nouvelle version.")
-
-            if edit_mode:
-                import pandas as pd
-                before = pd.DataFrame(table, columns=["_row"] + columns)
-                choices = sorted(set(sheets.RETOUR_CHOICES) | {r["Retour"] for r in table})
-                edited = st.data_editor(
-                    before, key="sheet_editor", hide_index=True, width="stretch", height=480, num_rows="fixed",
-                    column_order=columns, disabled=["N"],
-                    column_config={
-                        "N": st.column_config.TextColumn("N", width="small"),
-                        "Retour": st.column_config.SelectboxColumn("Retour", options=choices, width="small"),
-                        "Date": st.column_config.TextColumn("Date", width="small", help="jj/mm/aaaa"),
-                        "Lien": st.column_config.TextColumn("Lien", width="medium"),
-                        "Commentaire": st.column_config.TextColumn("Commentaire", width="large"),
-                    },
-                )
-                changes = sheets.diff_rows(table, edited.fillna("").to_dict("records"))
-                s1, s2 = st.columns([2, 3])
-                if s1.button(f"💾 Enregistrer ({len(changes)} modification(s))", type="primary", disabled=not changes):
-                    done, failed = 0, []
-                    with st.spinner("Mise à jour du Google Sheets..."):
-                        for row_n, poste, fields in changes:
-                            try:
-                                sheets.update_row(row_n, poste, fields)
-                                done += 1
-                            except Exception as e:
-                                failed.append(f"ligne {row_n} ({poste[:30]}) : {e}")
-                        read_sheet.clear(wait=True)
-                    st.session_state.pop("sheet_editor", None)
-                    st.session_state.sheet_save_result = (done, failed)
-                    st.rerun()
-                if changes:
-                    s2.caption("Modifications pas encore envoyées : clique sur Enregistrer.")
+            view_mode = st.segmented_control("Affichage", ["🗂️ Cartes", "📋 Tableau"], default="🗂️ Cartes",
+                                             key="sheet_view", label_visibility="collapsed") or "🗂️ Cartes"
+            if view_mode == "🗂️ Cartes":
+                render_application_cards(rows, sheet["version"] >= 3)
             else:
-                st.caption("Clique sur une ligne pour la sélectionner, puis sur « Ouvrir l'annonce ».")
-                import pandas as pd
-                view = pd.DataFrame(table, columns=["_row"] + columns)
-                event = st.dataframe(
-                    view.style.apply(sheets.row_style, axis=1, dark=IS_DARK), hide_index=True, width="stretch", height=480,
-                    key="sheet_table",
-                    column_order=columns, on_select="rerun", selection_mode="single-row",
-                    column_config={
-                        "N": st.column_config.TextColumn("N", width="small"),
-                        "Lien": st.column_config.TextColumn("Lien", width="medium"),
-                        "Retour": st.column_config.TextColumn("Retour", width="small"),
-                        "Date": st.column_config.TextColumn("Date", width="small"),
-                    },
-                )
-                picked = event.selection.rows if event and event.selection else []
-                if picked:
-                    row = table[picked[0]]
-                    label = f"{row['Poste']} — {row['Entreprise']}"
-                    if row["Lien"]:
-                        st.button(f"Ouvrir l'annonce ↗  ({label[:70]})", key="open_sheet_row",
-                                  on_click=open_external, args=(row["Lien"],), type="primary")
-                    else:
-                        st.caption(f"« {label[:70]} » n'a pas de lien dans ton Sheets.")
-                    hp, pf = gemini_and_profile()
-                    prep_key = f"sheetprep_{row['_row']}"
-                    if hp is not None and st.button(f"🎯 Préparer l'entretien ({label[:50]})", key=f"btn_{prep_key}"):
-                        with st.spinner("Préparation de l'entretien..."):
+                retours = sorted({(r.get("retour") or "Sans retour") for r in rows})
+                g1, g2 = st.columns([2, 3])
+                pick = g1.multiselect("Retour", retours, default=retours)
+                q2 = g2.text_input("Rechercher (poste, entreprise, commentaire)", key="sheet_q").lower().strip()
+                table = [
+                    {"_row": r.get("row"), "N": r.get("n", ""), "Poste": r.get("poste", ""),
+                     "Entreprise": r.get("entreprise", ""), "Date": r.get("date", ""), "Retour": r.get("retour") or "",
+                     "Lien": r.get("url") or r.get("lien") or "", "Commentaire": r.get("commentaire", "")}
+                    for r in rows
+                    if (r.get("retour") or "Sans retour") in pick
+                    and (not q2 or q2 in f"{r.get('poste','')} {r.get('entreprise','')} {r.get('commentaire','')}".lower())
+                ]
+                table.sort(key=lambda r: int(r["N"]) if str(r["N"]).isdigit() else 0, reverse=True)
+                columns = ["N", "Poste", "Entreprise", "Date", "Retour", "Lien", "Commentaire"]
+
+                can_edit = sheet["version"] >= 3
+                edit_mode = st.toggle("✏️ Modifier", key="sheet_edit_mode", disabled=not can_edit,
+                                      help="Modifie les cases directement, puis enregistre : ton Google Sheets est mis à jour."
+                                      if can_edit else "Mets d'abord ton script Google à jour (version 3).")
+                if not can_edit:
+                    st.caption("Pour modifier ton Sheets depuis ici, mets à jour ton script Google "
+                               "(google_sheets/apps_script.gs) puis Déployer > Gérer les déploiements > Nouvelle version.")
+
+                if edit_mode:
+                    import pandas as pd
+                    before = pd.DataFrame(table, columns=["_row"] + columns)
+                    choices = sorted(set(sheets.RETOUR_CHOICES) | {r["Retour"] for r in table})
+                    edited = st.data_editor(
+                        before, key="sheet_editor", hide_index=True, width="stretch", height=480, num_rows="fixed",
+                        column_order=columns, disabled=["N"],
+                        column_config={
+                            "N": st.column_config.TextColumn("N", width="small"),
+                            "Retour": st.column_config.SelectboxColumn("Retour", options=choices, width="small"),
+                            "Date": st.column_config.TextColumn("Date", width="small", help="jj/mm/aaaa"),
+                            "Lien": st.column_config.TextColumn("Lien", width="medium"),
+                            "Commentaire": st.column_config.TextColumn("Commentaire", width="large"),
+                        },
+                    )
+                    changes = sheets.diff_rows(table, edited.fillna("").to_dict("records"))
+                    s1, s2 = st.columns([2, 3])
+                    if s1.button(f"💾 Enregistrer ({len(changes)} modification(s))", type="primary", disabled=not changes):
+                        done, failed = 0, []
+                        with st.spinner("Mise à jour du Google Sheets..."):
+                            for row_n, poste, fields in changes:
+                                try:
+                                    sheets.update_row(row_n, poste, fields)
+                                    done += 1
+                                except Exception as e:
+                                    failed.append(f"ligne {row_n} ({poste[:30]}) : {e}")
+                            read_sheet.clear(wait=True)
+                        st.session_state.pop("sheet_editor", None)
+                        st.session_state.sheet_save_result = (done, failed)
+                        st.rerun()
+                    if changes:
+                        s2.caption("Modifications pas encore envoyées : clique sur Enregistrer.")
+                else:
+                    st.caption("Clique sur une ligne pour la sélectionner, puis sur « Ouvrir l'annonce ».")
+                    import pandas as pd
+                    view = pd.DataFrame(table, columns=["_row"] + columns)
+                    event = st.dataframe(
+                        view.style.apply(sheets.row_style, axis=1, dark=IS_DARK), hide_index=True, width="stretch", height=480,
+                        key="sheet_table",
+                        column_order=columns, on_select="rerun", selection_mode="single-row",
+                        column_config={
+                            "N": st.column_config.TextColumn("N", width="small"),
+                            "Lien": st.column_config.TextColumn("Lien", width="medium"),
+                            "Retour": st.column_config.TextColumn("Retour", width="small"),
+                            "Date": st.column_config.TextColumn("Date", width="small"),
+                        },
+                    )
+                    picked = event.selection.rows if event and event.selection else []
+                    if picked:
+                        row = table[picked[0]]
+                        label = f"{row['Poste']} — {row['Entreprise']}"
+                        if row["Lien"]:
+                            st.button(f"Ouvrir l'annonce ↗  ({label[:70]})", key="open_sheet_row",
+                                      on_click=open_external, args=(row["Lien"],), type="primary")
+                        else:
+                            st.caption(f"« {label[:70]} » n'a pas de lien dans ton Sheets.")
+                        hp, pf = gemini_and_profile()
+                        prep_key = f"sheetprep_{row['_row']}"
+                        if hp is not None and st.button(f"🎯 Préparer l'entretien ({label[:50]})", key=f"btn_{prep_key}"):
+                            with st.spinner("Préparation de l'entretien..."):
+                                try:
+                                    pseudo = {"id": f"sheet_{row['_row']}", "title": row["Poste"], "company": row["Entreprise"],
+                                              "url": row["Lien"], "source": stats.source_of(row["Lien"])}
+                                    st.session_state[prep_key] = tracking.generate_interview_prep(pseudo, hp, pf, description="")
+                                except Exception as e:
+                                    st.error(f"Impossible de préparer l'entretien : {e}")
+                        if st.session_state.get(prep_key):
+                            with st.container(border=True):
+                                st.markdown(st.session_state[prep_key])
+                            st.caption("Préparation faite à partir du seul intitulé : ajoute l'annonce dans l'application "
+                                       "pour une fiche plus précise.")
+
+            result = st.session_state.pop("sheet_save_result", None)
+            if result:
+                done, failed = result
+                if done:
+                    st.success(f"{done} ligne(s) mise(s) à jour dans ton Google Sheets.")
+                for f in failed:
+                    st.error(f"Non enregistré — {f}")
+
+            with st.expander("➕ Ajouter une candidature faite ailleurs (spontanée, intérim, salon...)"):
+                with st.form("add_application", clear_on_submit=True):
+                    a1, a2 = st.columns(2)
+                    new_poste = a1.text_input("Poste *")
+                    new_ent = a2.text_input("Entreprise *")
+                    a3, a4, a5 = st.columns([3, 1, 1])
+                    new_url = a3.text_input("Lien (facultatif)")
+                    new_date = a4.date_input("Date", format="DD/MM/YYYY")
+                    new_retour = a5.selectbox("Retour", ["En attente", "Positif", "Negatif"])
+                    new_com = st.text_input("Commentaire (facultatif)")
+                    if st.form_submit_button("Ajouter au Google Sheets", type="primary"):
+                        if not new_poste.strip() or not new_ent.strip():
+                            st.error("Le poste et l'entreprise sont obligatoires.")
+                        else:
                             try:
-                                pseudo = {"id": f"sheet_{row['_row']}", "title": row["Poste"], "company": row["Entreprise"],
-                                          "url": row["Lien"], "source": stats.source_of(row["Lien"])}
-                                st.session_state[prep_key] = tracking.generate_interview_prep(pseudo, hp, pf, description="")
+                                res = sheets.add_row(new_poste.strip(), new_ent.strip(), new_url.strip(),
+                                                     new_date.strftime("%d/%m/%Y"), new_retour, new_com.strip())
+                                read_sheet.clear()
+                                st.toast(f"Ajoutée au Google Sheets (ligne {res.get('row')})")
+                                st.rerun()
                             except Exception as e:
-                                st.error(f"Impossible de préparer l'entretien : {e}")
-                    if st.session_state.get(prep_key):
-                        with st.container(border=True):
-                            st.markdown(st.session_state[prep_key])
-                        st.caption("Préparation faite à partir du seul intitulé : ajoute l'annonce dans l'application "
-                                   "pour une fiche plus précise.")
+                                st.error(f"Impossible d'ajouter la ligne : {e}")
 
-        result = st.session_state.pop("sheet_save_result", None)
-        if result:
-            done, failed = result
-            if done:
-                st.success(f"{done} ligne(s) mise(s) à jour dans ton Google Sheets.")
-            for f in failed:
-                st.error(f"Non enregistré — {f}")
-
-        with st.expander("➕ Ajouter une candidature faite ailleurs (spontanée, intérim, salon...)"):
-            with st.form("add_application", clear_on_submit=True):
-                a1, a2 = st.columns(2)
-                new_poste = a1.text_input("Poste *")
-                new_ent = a2.text_input("Entreprise *")
-                a3, a4, a5 = st.columns([3, 1, 1])
-                new_url = a3.text_input("Lien (facultatif)")
-                new_date = a4.date_input("Date", format="DD/MM/YYYY")
-                new_retour = a5.selectbox("Retour", ["En attente", "Positif", "Negatif"])
-                new_com = st.text_input("Commentaire (facultatif)")
-                if st.form_submit_button("Ajouter au Google Sheets", type="primary"):
-                    if not new_poste.strip() or not new_ent.strip():
-                        st.error("Le poste et l'entreprise sont obligatoires.")
-                    else:
-                        try:
-                            res = sheets.add_row(new_poste.strip(), new_ent.strip(), new_url.strip(),
-                                                 new_date.strftime("%d/%m/%Y"), new_retour, new_com.strip())
-                            read_sheet.clear()
-                            st.toast(f"Ajoutée au Google Sheets (ligne {res.get('row')})")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Impossible d'ajouter la ligne : {e}")
-
-        weeks = sheets.summary(rows)["par_semaine"]
-        if weeks:
-            st.markdown("**Candidatures par semaine**")
-            last = sorted(weeks)[-16:]
-            st.bar_chart({"Semaine du": [d.isoformat() for d in last],
-                          "Candidatures": [weeks[d] for d in last]},
-                         x="Semaine du", y="Candidatures", height=220)
+            weeks = sheets.summary(rows)["par_semaine"]
+            if weeks:
+                st.markdown("**Candidatures par semaine**")
+                last = sorted(weeks)[-16:]
+                st.bar_chart({"Semaine du": [d.isoformat() for d in last],
+                              "Candidatures": [weeks[d] for d in last]},
+                             x="Semaine du", y="Candidatures", height=220)
 
 # ----------------------------------------------------------------- Statistiques
 with tab_stats:
-    srows = sheet["rows"] if SHEETS_ON and not sheet_error else []
-    if not srows:
-        st.info("Les statistiques se calculent à partir de ton Google Sheets : relie-le pour les voir.")
-    else:
-        st.markdown("#### Ce qu'il faut retenir")
-        for line in stats.insights(srows):
-            st.markdown(f"- {line}")
-        st.caption("« Taux de réponse » = positifs + négatifs ; « Taux positif » = entretiens ou suites favorables. "
-                   "Les groupes de moins de 5 candidatures sont à prendre avec prudence.")
+    if tab_stats.open:
+        srows = sheet["rows"] if SHEETS_ON and not sheet_error else []
+        if not srows:
+            st.info("Les statistiques se calculent à partir de ton Google Sheets : relie-le pour les voir.")
+        else:
+            st.markdown("#### Ce qu'il faut retenir")
+            for line in stats.insights(srows):
+                st.markdown(f"- {line}")
+            st.caption("« Taux de réponse » = positifs + négatifs ; « Taux positif » = entretiens ou suites favorables. "
+                       "Les groupes de moins de 5 candidatures sont à prendre avec prudence.")
 
-        rate_cols = {
-            "Taux de réponse": st.column_config.ProgressColumn("Taux de réponse", format="%d %%", min_value=0, max_value=100),
-            "Taux positif": st.column_config.ProgressColumn("Taux positif", format="%.1f %%", min_value=0, max_value=20),
-        }
-        st.markdown("#### Par type de poste")
-        fam = stats.breakdown(srows, lambda r: stats.family(r.get("poste")))
-        st.dataframe(fam, hide_index=True, width="stretch", column_config=rate_cols)
+            rate_cols = {
+                "Taux de réponse": st.column_config.ProgressColumn("Taux de réponse", format="%d %%", min_value=0, max_value=100),
+                "Taux positif": st.column_config.ProgressColumn("Taux positif", format="%.1f %%", min_value=0, max_value=20),
+            }
+            st.markdown("#### Par type de poste")
+            fam = stats.breakdown(srows, lambda r: stats.family(r.get("poste")))
+            st.dataframe(fam, hide_index=True, width="stretch", column_config=rate_cols)
 
-        left, right = st.columns(2)
-        with left:
-            st.markdown("#### Par source")
-            src = stats.breakdown(srows, lambda r: stats.source_of(r.get("url") or r.get("lien")))
-            st.dataframe(src, hide_index=True, width="stretch", column_config=rate_cols)
-        with right:
-            st.markdown("#### Offres trouvées par l'application")
-            found = {}
-            for o in offers:
-                if o.get("relevancy_check") == "duplicate":
-                    continue
-                f = found.setdefault(o.get("source") or "?", {"Source": o.get("source") or "?", "Trouvées": 0,
-                                                              "Retenues": 0, "Candidatées": 0})
-                f["Trouvées"] += 1
-                f["Retenues"] += o in retained
-                f["Candidatées"] += o["status"] in ("Candidaté", "Entretien", "Refusé")
-            st.dataframe(sorted(found.values(), key=lambda f: -f["Trouvées"]), hide_index=True, width="stretch")
+            left, right = st.columns(2)
+            with left:
+                st.markdown("#### Par source")
+                src = stats.breakdown(srows, lambda r: stats.source_of(r.get("url") or r.get("lien")))
+                st.dataframe(src, hide_index=True, width="stretch", column_config=rate_cols)
+            with right:
+                st.markdown("#### Offres trouvées par l'application")
+                found = {}
+                for o in offers:
+                    if o.get("relevancy_check") == "duplicate":
+                        continue
+                    f = found.setdefault(o.get("source") or "?", {"Source": o.get("source") or "?", "Trouvées": 0,
+                                                                  "Retenues": 0, "Candidatées": 0})
+                    f["Trouvées"] += 1
+                    f["Retenues"] += o in retained
+                    f["Candidatées"] += o["status"] in ("Candidaté", "Entretien", "Refusé")
+                st.dataframe(sorted(found.values(), key=lambda f: -f["Trouvées"]), hide_index=True, width="stretch")
 
-        months = stats.by_month(srows)
-        if months:
-            st.markdown("#### Candidatures et retours positifs par mois")
-            st.bar_chart(months, x="Mois", y=["Candidatures", "Positifs"], stack=False, height=260)
+            months = stats.by_month(srows)
+            if months:
+                st.markdown("#### Candidatures et retours positifs par mois")
+                st.bar_chart(months, x="Mois", y=["Candidatures", "Positifs"], stack=False, height=260)
 
 # ----------------------------------------------------------------- Activité
 with tab_activite:
-    st.markdown(f"Les recherches tournent automatiquement {SCHEDULE_TEXT}.")
-    b1, b2 = st.columns(2)
-    run_now = b1.button("🔎 Lancer la recherche LinkedIn + APEC maintenant", type="primary")
-    if b2.button("🔄 Synchroniser VIE + HelloWork + Adecco + CRIT (GitHub)"):
-        sync_github()
+    if tab_activite.open:
+        st.markdown(f"Les recherches tournent automatiquement {SCHEDULE_TEXT}.")
+        b1, b2 = st.columns(2)
+        run_now = b1.button("🔎 Lancer la recherche LinkedIn + APEC maintenant", type="primary")
+        if b2.button("🔄 Synchroniser VIE + HelloWork + Adecco + CRIT (GitHub)"):
+            sync_github()
 
-    live = st.empty()
-    if run_now:
-        with st.spinner("Recherche LinkedIn + APEC en cours, ça prend quelques minutes..."):
-            code = run_search_live(live)
-        if code == 0:
-            st.success("Recherche terminée. Les nouvelles offres retenues sont dans l'onglet Offres et sur Telegram.")
+        live = st.empty()
+        if run_now:
+            with st.spinner("Recherche LinkedIn + APEC en cours, ça prend quelques minutes..."):
+                code = run_search_live(live)
+            if code == 0:
+                st.success("Recherche terminée. Les nouvelles offres retenues sont dans l'onglet Offres et sur Telegram.")
+            else:
+                st.error("La recherche s'est terminée avec une erreur : regarde le journal ci-dessous.")
+
+        if SHEETS_ON and not sheet_error:
+            st.caption(f"Google Sheets relié (lu à {sheet['read_at']}) : voir l'onglet 📗 Mes candidatures.")
+
+        st.subheader("Historique des passages")
+        rows = tracking.read_metrics(tracking.LOCAL_METRICS, "PC (LinkedIn + APEC)") + \
+            tracking.read_metrics(tracking.GITHUB_METRICS, "GitHub (HelloWork, Adecco, CRIT)") + \
+            tracking.read_metrics(tracking.VIE_METRICS, "GitHub (VIE)")
+        rows.sort(key=lambda r: r["Date"], reverse=True)
+        if rows:
+            st.dataframe(rows[:100], width="stretch", hide_index=True)
         else:
-            st.error("La recherche s'est terminée avec une erreur : regarde le journal ci-dessous.")
+            st.caption("Aucun passage enregistré pour l'instant.")
 
-    if SHEETS_ON and not sheet_error:
-        st.caption(f"Google Sheets relié (lu à {sheet['read_at']}) : voir l'onglet 📗 Mes candidatures.")
-
-    st.subheader("Historique des passages")
-    rows = tracking.read_metrics(tracking.LOCAL_METRICS, "PC (LinkedIn + APEC)") + \
-        tracking.read_metrics(tracking.GITHUB_METRICS, "GitHub (HelloWork, Adecco, CRIT)") + \
-        tracking.read_metrics(tracking.VIE_METRICS, "GitHub (VIE)")
-    rows.sort(key=lambda r: r["Date"], reverse=True)
-    if rows:
-        st.dataframe(rows[:100], width="stretch", hide_index=True)
-    else:
-        st.caption("Aucun passage enregistré pour l'instant.")
-
-    st.subheader("Journal de la recherche LinkedIn + APEC (sur ce PC)")
-    log = tracking.tail(tracking.LOG_PATH, 120)
-    st.code(log or "Journal vide pour l'instant.", language=None)
+        st.subheader("Journal de la recherche LinkedIn + APEC (sur ce PC)")
+        log = tracking.tail(tracking.LOG_PATH, 120)
+        st.code(log or "Journal vide pour l'instant.", language=None)
 
 # ----------------------------------------------------------------- Réseau
 with tab_reseau:
-    _me = letter_docx.load_contact() if letter_docx else {}
-    reseau_ui.render_fragment(handler, profile, offers, reseau.signature_text(_me), open_external)
+    if tab_reseau.open:
+        _me = letter_docx.load_contact() if letter_docx else {}
+        reseau_ui.render_fragment(handler, profile, offers, reseau.signature_text(_me), open_external)
 
 # ----------------------------------------------------------------- Réglages
 with tab_reglages:
-    settings = cdi_main.load_settings()
-    st.markdown(
-        "Les réglages sont dans **cdi_search.yaml**. Modifie-les sur GitHub : le PC et GitHub "
-        "les récupèrent au passage suivant."
-    )
-    st.markdown("#### ✉️ Tes coordonnées pour les lettres Word")
-    if letter_docx is None:
-        st.caption("Indisponible : relance windows\\start_app.ps1 (installe python-docx).")
-    else:
-        contact = letter_docx.load_contact()
-        with st.form("contact_form"):
-            c1, c2 = st.columns(2)
-            values = {
-                "nom": c1.text_input("Nom", contact.get("nom", "")),
-                "telephone": c2.text_input("Téléphone", contact.get("telephone", "")),
-                "email": c1.text_input("E-mail", contact.get("email", "")),
-                "ville": c2.text_input("Ville (pour « Ville, le 10 novembre 2026 »)", contact.get("ville", "")),
-                "linkedin": c1.text_input("LinkedIn (facultatif)", contact.get("linkedin", "")),
-            }
-            if st.form_submit_button("Enregistrer", type="primary"):
-                letter_docx.save_contact({k: v.strip() for k, v in values.items()})
-                st.toast("Coordonnées enregistrées (sur ce PC uniquement).")
-        st.caption("Gardées uniquement sur ce PC (data/coordonnees.json), jamais envoyées sur GitHub.")
-    st.divider()
-    st.markdown("#### 📄 Tes CV PowerPoint (modèles pour les CV adaptés)")
-    if cv_pptx is None:
-        st.caption("Indisponible : relance windows\\start_app.ps1 (installe python-pptx).")
-    else:
-        st.caption("Un fichier .pptx d'une page par CV. Gemini ne réécrit que l'intitulé, le profil, les compétences "
-                   "et les descriptions, sans rien inventer ; la mise en page, la photo, les dates et tes coordonnées "
-                   "restent telles quelles. Gardés uniquement sur ce PC (data/cv_modeles), jamais envoyés sur GitHub.")
-        for key in cv_pptx.model_keys():
-            label = candidat.cv_label(key) or key
-            c1, c2, c3 = st.columns([2, 3, 1])
-            have = cv_pptx.model_path(key) is not None
-            c1.markdown(f"{'✅' if have else '⬜'} **{label}**")
-            up = c2.file_uploader(f"Modèle {label}", type=["pptx"], key=f"cvup_{key}",
-                                  label_visibility="collapsed")
-            if up is not None and st.session_state.get(f"cvup_done_{key}") != up.file_id:
-                try:
-                    cv_pptx.save_model(key, up.getvalue())
-                    st.session_state[f"cvup_done_{key}"] = up.file_id
-                    st.toast(f"Modèle « {label} » enregistré.")
+    if tab_reglages.open:
+        settings = cdi_main.load_settings()
+        st.markdown(
+            "Les réglages sont dans **cdi_search.yaml**. Modifie-les sur GitHub : le PC et GitHub "
+            "les récupèrent au passage suivant."
+        )
+        st.markdown("#### ✉️ Tes coordonnées pour les lettres Word")
+        if letter_docx is None:
+            st.caption("Indisponible : relance windows\\start_app.ps1 (installe python-docx).")
+        else:
+            contact = letter_docx.load_contact()
+            with st.form("contact_form"):
+                c1, c2 = st.columns(2)
+                values = {
+                    "nom": c1.text_input("Nom", contact.get("nom", "")),
+                    "telephone": c2.text_input("Téléphone", contact.get("telephone", "")),
+                    "email": c1.text_input("E-mail", contact.get("email", "")),
+                    "ville": c2.text_input("Ville (pour « Ville, le 10 novembre 2026 »)", contact.get("ville", "")),
+                    "linkedin": c1.text_input("LinkedIn (facultatif)", contact.get("linkedin", "")),
+                }
+                if st.form_submit_button("Enregistrer", type="primary"):
+                    letter_docx.save_contact({k: v.strip() for k, v in values.items()})
+                    st.toast("Coordonnées enregistrées (sur ce PC uniquement).")
+            st.caption("Gardées uniquement sur ce PC (data/coordonnees.json), jamais envoyées sur GitHub.")
+        st.divider()
+        st.markdown("#### 📄 Tes CV PowerPoint (modèles pour les CV adaptés)")
+        if cv_pptx is None:
+            st.caption("Indisponible : relance windows\\start_app.ps1 (installe python-pptx).")
+        else:
+            st.caption("Un fichier .pptx d'une page par CV. Gemini ne réécrit que l'intitulé, le profil, les compétences "
+                       "et les descriptions, sans rien inventer ; la mise en page, la photo, les dates et tes coordonnées "
+                       "restent telles quelles. Gardés uniquement sur ce PC (data/cv_modeles), jamais envoyés sur GitHub.")
+            for key in cv_pptx.model_keys():
+                label = candidat.cv_label(key) or key
+                c1, c2, c3 = st.columns([2, 3, 1])
+                have = cv_pptx.model_path(key) is not None
+                c1.markdown(f"{'✅' if have else '⬜'} **{label}**")
+                up = c2.file_uploader(f"Modèle {label}", type=["pptx"], key=f"cvup_{key}",
+                                      label_visibility="collapsed")
+                if up is not None and st.session_state.get(f"cvup_done_{key}") != up.file_id:
+                    try:
+                        cv_pptx.save_model(key, up.getvalue())
+                        st.session_state[f"cvup_done_{key}"] = up.file_id
+                        st.toast(f"Modèle « {label} » enregistré.")
+                        st.rerun()
+                    except ValueError as e:
+                        c2.error(f"Fichier refusé : {e}")
+                if have and c3.button("Retirer", key=f"cvdel_{key}"):
+                    cv_pptx.delete_model(key)
                     st.rerun()
-                except ValueError as e:
-                    c2.error(f"Fichier refusé : {e}")
-            if have and c3.button("Retirer", key=f"cvdel_{key}"):
-                cv_pptx.delete_model(key)
-                st.rerun()
-    st.divider()
-    st.button("Modifier cdi_search.yaml sur GitHub ↗", on_click=open_external,
-              args=(f"{repo_url()}/edit/main/cdi_search.yaml",))
-    r1, r2 = st.columns(2)
-    with r1:
-        st.markdown("**Mots-clés**")
-        st.write(", ".join(settings.get("keywords", [])))
-        st.markdown(f"**Expérience maximale exigée :** {settings.get('max_experience_years', 3)} ans")
-        st.markdown(f"**Ancienneté max des offres :** {settings.get('max_days', 21)} jours")
-        _tt = temps_travail.value(settings)
-        st.markdown(f"**Temps de travail :** {temps_travail.LABELS[_tt] if _tt else 'non précisé (réglage temps_de_travail)'}")
-    with r2:
-        st.markdown("**Mots exclus dans l'intitulé**")
-        st.write(", ".join(settings.get("excluded_title_words", [])))
-        st.markdown("**Domaines refusés**")
-        for d in settings.get("excluded_domains", []):
-            st.write(f"- {d}")
+        st.divider()
+        st.button("Modifier cdi_search.yaml sur GitHub ↗", on_click=open_external,
+                  args=(f"{repo_url()}/edit/main/cdi_search.yaml",))
+        r1, r2 = st.columns(2)
+        with r1:
+            st.markdown("**Mots-clés**")
+            st.write(", ".join(settings.get("keywords", [])))
+            st.markdown(f"**Expérience maximale exigée :** {settings.get('max_experience_years', 3)} ans")
+            st.markdown(f"**Ancienneté max des offres :** {settings.get('max_days', 21)} jours")
+            _tt = temps_travail.value(settings)
+            st.markdown(f"**Temps de travail :** {temps_travail.LABELS[_tt] if _tt else 'non précisé (réglage temps_de_travail)'}")
+        with r2:
+            st.markdown("**Mots exclus dans l'intitulé**")
+            st.write(", ".join(settings.get("excluded_title_words", [])))
+            st.markdown("**Domaines refusés**")
+            for d in settings.get("excluded_domains", []):
+                st.write(f"- {d}")
 
 
 # ----------------------------------------------------------------- dialogs (drawn last)
